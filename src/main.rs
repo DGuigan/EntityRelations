@@ -3,18 +3,48 @@ use bevy::ecs::{
     system::SystemParam,
 };
 use bevy::prelude::*;
-use std::{collections::HashMap, marker::PhantomData};
-
-trait RelationStore {}
+use std::{
+    collections::{hash_map, HashMap},
+    marker::PhantomData,
+};
 
 // Private types. Cannot be queried for directly.
-struct Exclusive<T>(Entity, T);
 struct Multi<T>(HashMap<Entity, T>);
+struct Exclucive<T>(Entity, T);
 
-impl<T> RelationStore for Exclusive<T> {}
-impl<T> RelationStore for Multi<T> {}
+trait RelationStore {
+    type Relation;
+    // Need this atm because return position impl trait in traits are unstable
+    type Iter<'a>: Iterator<Item = (&'a Entity, &'a Self::Relation)>
+    where
+        Self: 'a;
 
-impl<T: Component> Component for Exclusive<T> {
+    fn iter(&self) -> Self::Iter<'_>;
+}
+
+impl<T> RelationStore for Exclucive<T> {
+    type Relation = T;
+    type Iter<'a> = std::iter::Once<(&'a Entity, &'a Self::Relation)>
+    where
+        T: 'a;
+
+    fn iter(&self) -> Self::Iter<'_> {
+        std::iter::once((&self.0, &self.1))
+    }
+}
+
+impl<T> RelationStore for Multi<T> {
+    type Relation = T;
+    type Iter<'a> = hash_map::Iter<'a, Entity, Self::Relation>
+    where
+        T: 'a;
+
+    fn iter(&self) -> Self::Iter<'_> {
+        self.0.iter()
+    }
+}
+
+impl<T: Component> Component for Exclucive<T> {
     type Storage = T::Storage;
 }
 
@@ -23,56 +53,20 @@ impl<T: Component> Component for Multi<T> {
 }
 
 trait Relation: Component {
-    type Store: RelationStore;
+    type Store: RelationStore<Relation = Self>;
 }
 
 #[derive(WorldQuery)]
 struct RelationQuery<T, Components>
 where
     T: Relation + Component,
-    T::Store: Component + 'static,
+    T::Store: Component,
     Components: WorldQuery + ReadOnlyWorldQuery,
 {
     relations: &'static T::Store,
     components: Components,
     #[world_query(ignore)]
     _phantom: PhantomData<T>,
-}
-
-#[derive(SystemParam)]
-struct All<'w, 's, RelatedBy, FosterQuery, TargetQuery>
-where
-    RelatedBy: Relation,
-    RelatedBy::Store: Component,
-    FosterQuery: 'static + WorldQuery + ReadOnlyWorldQuery,
-    TargetQuery: 'static + WorldQuery + ReadOnlyWorldQuery,
-{
-    relation_query: Query<'w, 's, RelationQuery<RelatedBy, FosterQuery>>,
-    target_components: Query<'w, 's, TargetQuery>,
-}
-
-impl<'w, 's, RelatedBy, FosterQuery, TargetQuery> All<'w, 's, RelatedBy, FosterQuery, TargetQuery>
-where
-    RelatedBy: Relation,
-    RelatedBy::Store: Component,
-    FosterQuery: 'static + WorldQuery + ReadOnlyWorldQuery,
-    TargetQuery: 'static + WorldQuery + ReadOnlyWorldQuery,
-{
-    fn iter(&self) -> impl '_ + Iterator {
-        self.relation_query.iter().map(|rel_q| {})
-    }
-}
-
-#[derive(SystemParam)]
-struct Only<'w, 's, RelatedBy, FosterQuery, TargetQuery>
-where
-    RelatedBy: Relation,
-    RelatedBy::Store: Component,
-    FosterQuery: 'static + WorldQuery + ReadOnlyWorldQuery,
-    TargetQuery: 'static + WorldQuery + ReadOnlyWorldQuery,
-{
-    relation_query: Query<'w, 's, RelationQuery<RelatedBy, FosterQuery>>,
-    target_components: Query<'w, 's, TargetQuery>,
 }
 
 fn main() {
