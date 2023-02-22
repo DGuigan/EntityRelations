@@ -8,7 +8,7 @@ use bevy::{
     math::{DVec2, DVec3},
     pbr::{ExtractedPointLight, GlobalLightMeta},
     prelude::*,
-    render::{camera::ScalingMode, RenderApp, RenderSet},
+    render::{camera::ScalingMode, Extract, RenderApp, RenderStage},
     window::{PresentMode, WindowPlugin},
 };
 use rand::{thread_rng, Rng};
@@ -156,13 +156,15 @@ impl Plugin for LogVisibleLights {
             Err(_) => return,
         };
 
-        render_app.add_system(print_visible_light_count.in_set(RenderSet::Prepare));
+        render_app
+            .add_system_to_stage(RenderStage::Extract, extract_time)
+            .add_system_to_stage(RenderStage::Prepare, print_visible_light_count);
     }
 }
 
 // System for printing the number of meshes on every tick of the timer
 fn print_visible_light_count(
-    time: Res<Time>,
+    time: Res<ExtractedTime>,
     mut timer: Local<PrintingTimer>,
     visible: Query<&ExtractedPointLight>,
     global_light_meta: Res<GlobalLightMeta>,
@@ -176,6 +178,13 @@ fn print_visible_light_count(
             global_light_meta.entity_to_index.len()
         );
     }
+}
+
+#[derive(Resource, Deref, DerefMut)]
+pub struct ExtractedTime(Time);
+
+fn extract_time(mut commands: Commands, time: Extract<Res<Time>>) {
+    commands.insert_resource(ExtractedTime(time.clone()));
 }
 
 struct PrintingTimer(Timer);

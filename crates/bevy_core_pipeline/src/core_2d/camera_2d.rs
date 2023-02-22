@@ -1,5 +1,5 @@
 use crate::{clear_color::ClearColorConfig, tonemapping::Tonemapping};
-use bevy_ecs::prelude::*;
+use bevy_ecs::{prelude::*, query::QueryItem};
 use bevy_reflect::Reflect;
 use bevy_render::{
     camera::{Camera, CameraProjection, CameraRenderGraph, OrthographicProjection},
@@ -9,11 +9,20 @@ use bevy_render::{
 };
 use bevy_transform::prelude::{GlobalTransform, Transform};
 
-#[derive(Component, Default, Reflect, Clone, ExtractComponent)]
-#[extract_component_filter(With<Camera>)]
+#[derive(Component, Default, Reflect, Clone)]
 #[reflect(Component)]
 pub struct Camera2d {
     pub clear_color: ClearColorConfig,
+}
+
+impl ExtractComponent for Camera2d {
+    type Query = &'static Self;
+    type Filter = With<Camera>;
+    type Out = Self;
+
+    fn extract_component(item: QueryItem<'_, Self::Query>) -> Option<Self> {
+        Some(item.clone())
+    }
 }
 
 #[derive(Bundle)]
@@ -52,7 +61,7 @@ impl Camera2dBundle {
         let transform = Transform::from_xyz(0.0, 0.0, far - 0.1);
         let view_projection =
             projection.get_projection_matrix() * transform.compute_matrix().inverse();
-        let frustum = Frustum::from_view_projection_custom_far(
+        let frustum = Frustum::from_view_projection(
             &view_projection,
             &transform.translation,
             &transform.back(),

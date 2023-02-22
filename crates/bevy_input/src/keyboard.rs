@@ -281,7 +281,7 @@ pub enum KeyCode {
     Apostrophe,
     /// The `Apps` key.
     Apps,
-    /// The `Asterisk` / `*` key.
+    /// The `Asterik` / `*` key.
     Asterisk,
     /// The `Plus` / `+` key.
     Plus,

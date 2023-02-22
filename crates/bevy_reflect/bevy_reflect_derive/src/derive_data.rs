@@ -1,7 +1,6 @@
 use crate::container_attributes::ReflectTraits;
 use crate::field_attributes::{parse_field_attrs, ReflectFieldAttr};
-use crate::fq_std::{FQAny, FQDefault, FQSend, FQSync};
-use crate::utility::{members_to_serialization_denylist, WhereClauseOptions};
+use crate::utility::members_to_serialization_denylist;
 use bit_set::BitSet;
 use quote::quote;
 
@@ -317,16 +316,12 @@ impl<'a> ReflectMeta<'a> {
     }
 
     /// Returns the `GetTypeRegistration` impl as a `TokenStream`.
-    pub fn get_type_registration(
-        &self,
-        where_clause_options: &WhereClauseOptions,
-    ) -> proc_macro2::TokenStream {
+    pub fn get_type_registration(&self) -> proc_macro2::TokenStream {
         crate::registration::impl_get_type_registration(
             self.type_name,
             &self.bevy_reflect_path,
             self.traits.idents(),
             self.generics,
-            where_clause_options,
             None,
         )
     }
@@ -354,11 +349,8 @@ impl<'a> ReflectStruct<'a> {
 
     /// Returns the `GetTypeRegistration` impl as a `TokenStream`.
     ///
-    /// Returns a specific implementation for structs and this method should be preferred over the generic [`get_type_registration`](crate::ReflectMeta) method
-    pub fn get_type_registration(
-        &self,
-        where_clause_options: &WhereClauseOptions,
-    ) -> proc_macro2::TokenStream {
+    /// Returns a specific implementation for structs and this method should be preffered over the generic [`get_type_registration`](crate::ReflectMeta) method
+    pub fn get_type_registration(&self) -> proc_macro2::TokenStream {
         let reflect_path = self.meta.bevy_reflect_path();
 
         crate::registration::impl_get_type_registration(
@@ -366,53 +358,37 @@ impl<'a> ReflectStruct<'a> {
             reflect_path,
             self.meta.traits().idents(),
             self.meta.generics(),
-            where_clause_options,
             Some(&self.serialization_denylist),
         )
     }
 
     /// Get a collection of types which are exposed to the reflection API
     pub fn active_types(&self) -> Vec<syn::Type> {
-        self.active_fields()
+        self.fields
+            .iter()
+            .filter(move |field| field.attrs.ignore.is_active())
             .map(|field| field.data.ty.clone())
-            .collect()
+            .collect::<Vec<_>>()
     }
 
     /// Get an iterator of fields which are exposed to the reflection API
     pub fn active_fields(&self) -> impl Iterator<Item = &StructField<'a>> {
         self.fields
             .iter()
-            .filter(|field| field.attrs.ignore.is_active())
-    }
-
-    /// Get a collection of types which are ignored by the reflection API
-    pub fn ignored_types(&self) -> Vec<syn::Type> {
-        self.ignored_fields()
-            .map(|field| field.data.ty.clone())
-            .collect()
+            .filter(move |field| field.attrs.ignore.is_active())
     }
 
     /// Get an iterator of fields which are ignored by the reflection API
     pub fn ignored_fields(&self) -> impl Iterator<Item = &StructField<'a>> {
         self.fields
             .iter()
-            .filter(|field| field.attrs.ignore.is_ignored())
+            .filter(move |field| field.attrs.ignore.is_ignored())
     }
 
     /// The complete set of fields in this struct.
     #[allow(dead_code)]
     pub fn fields(&self) -> &[StructField<'a>] {
         &self.fields
-    }
-
-    pub fn where_clause_options(&self) -> WhereClauseOptions {
-        let bevy_reflect_path = &self.meta().bevy_reflect_path;
-        WhereClauseOptions {
-            active_types: self.active_types().into(),
-            active_trait_bounds: quote! { #bevy_reflect_path::Reflect },
-            ignored_types: self.ignored_types().into(),
-            ignored_trait_bounds: quote! { #FQAny + #FQSend + #FQSync },
-        }
     }
 }
 
@@ -433,70 +409,5 @@ impl<'a> ReflectEnum<'a> {
     /// The complete set of variants in this enum.
     pub fn variants(&self) -> &[EnumVariant<'a>] {
         &self.variants
-    }
-
-    /// Get an iterator of fields which are exposed to the reflection API
-    pub fn active_fields(&self) -> impl Iterator<Item = &StructField<'a>> {
-        self.variants()
-            .iter()
-            .flat_map(|variant| variant.active_fields())
-    }
-
-    /// Get a collection of types which are exposed to the reflection API
-    pub fn active_types(&self) -> Vec<syn::Type> {
-        self.active_fields()
-            .map(|field| field.data.ty.clone())
-            .collect()
-    }
-
-    /// Get an iterator of fields which are ignored by the reflection API
-    pub fn ignored_fields(&self) -> impl Iterator<Item = &StructField<'a>> {
-        self.variants()
-            .iter()
-            .flat_map(|variant| variant.ignored_fields())
-    }
-
-    /// Get a collection of types which are ignored to the reflection API
-    pub fn ignored_types(&self) -> Vec<syn::Type> {
-        self.ignored_fields()
-            .map(|field| field.data.ty.clone())
-            .collect()
-    }
-
-    pub fn where_clause_options(&self) -> WhereClauseOptions {
-        let bevy_reflect_path = &self.meta().bevy_reflect_path;
-        WhereClauseOptions {
-            active_types: self.active_types().into(),
-            active_trait_bounds: quote! { #bevy_reflect_path::FromReflect },
-            ignored_types: self.ignored_types().into(),
-            ignored_trait_bounds: quote! { #FQAny + #FQSend + #FQSync + #FQDefault },
-        }
-    }
-}
-
-impl<'a> EnumVariant<'a> {
-    /// Get an iterator of fields which are exposed to the reflection API
-    #[allow(dead_code)]
-    pub fn active_fields(&self) -> impl Iterator<Item = &StructField<'a>> {
-        self.fields()
-            .iter()
-            .filter(|field| field.attrs.ignore.is_active())
-    }
-
-    /// Get an iterator of fields which are ignored by the reflection API
-    #[allow(dead_code)]
-    pub fn ignored_fields(&self) -> impl Iterator<Item = &StructField<'a>> {
-        self.fields()
-            .iter()
-            .filter(|field| field.attrs.ignore.is_ignored())
-    }
-
-    /// The complete set of fields in this variant.
-    #[allow(dead_code)]
-    pub fn fields(&self) -> &[StructField<'a>] {
-        match &self.fields {
-            EnumVariantFields::Named(fields) | EnumVariantFields::Unnamed(fields) => fields,
-            EnumVariantFields::Unit => &[],
-        }
     }
 }

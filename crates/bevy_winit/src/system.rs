@@ -2,8 +2,7 @@ use bevy_ecs::{
     entity::Entity,
     event::EventWriter,
     prelude::{Changed, Component, Resource},
-    removal_detection::RemovedComponents,
-    system::{Commands, NonSendMut, Query},
+    system::{Commands, NonSendMut, Query, RemovedComponents},
     world::Mut,
 };
 use bevy_utils::{
@@ -14,16 +13,13 @@ use bevy_window::{RawHandleWrapper, Window, WindowClosed, WindowCreated};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 
 use winit::{
-    dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize},
+    dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
     event_loop::EventLoopWindowTarget,
 };
 
 #[cfg(target_arch = "wasm32")]
 use crate::web_resize::{CanvasParentResizeEventChannel, WINIT_CANVAS_SELECTOR};
-use crate::{
-    converters::{self, convert_window_level},
-    get_best_videomode, get_fitting_videomode, WinitWindows,
-};
+use crate::{converters, get_best_videomode, get_fitting_videomode, WinitWindows};
 #[cfg(target_arch = "wasm32")]
 use bevy_ecs::system::ResMut;
 
@@ -39,19 +35,20 @@ pub(crate) fn create_window<'a>(
     mut winit_windows: NonSendMut<WinitWindows>,
     #[cfg(target_arch = "wasm32")] event_channel: ResMut<CanvasParentResizeEventChannel>,
 ) {
-    for (entity, mut window) in created_windows {
+    for (entity, mut component) in created_windows {
         if winit_windows.get_window(entity).is_some() {
             continue;
         }
 
         info!(
             "Creating new window {:?} ({:?})",
-            window.title.as_str(),
+            component.title.as_str(),
             entity
         );
 
-        let winit_window = winit_windows.create_window(event_loop, entity, &window);
-        window
+        let winit_window = winit_windows.create_window(event_loop, entity, &component);
+        let current_size = winit_window.inner_size();
+        component
             .resolution
             .set_scale_factor(winit_window.scale_factor());
         commands
@@ -60,14 +57,18 @@ pub(crate) fn create_window<'a>(
                 window_handle: winit_window.raw_window_handle(),
                 display_handle: winit_window.raw_display_handle(),
             })
-            .insert(CachedWindow {
-                window: window.clone(),
+            .insert(WinitWindowInfo {
+                previous: component.clone(),
+                last_winit_size: PhysicalSize {
+                    width: current_size.width,
+                    height: current_size.height,
+                },
             });
 
         #[cfg(target_arch = "wasm32")]
         {
-            if window.fit_canvas_to_parent {
-                let selector = if let Some(selector) = &window.canvas {
+            if component.fit_canvas_to_parent {
+                let selector = if let Some(selector) = &component.canvas {
                     selector
                 } else {
                     WINIT_CANVAS_SELECTOR
@@ -85,26 +86,23 @@ pub(crate) fn create_window<'a>(
 pub struct WindowTitleCache(HashMap<Entity, String>);
 
 pub(crate) fn despawn_window(
-    mut closed: RemovedComponents<Window>,
-    window_entities: Query<&Window>,
+    closed: RemovedComponents<Window>,
     mut close_events: EventWriter<WindowClosed>,
     mut winit_windows: NonSendMut<WinitWindows>,
 ) {
     for window in closed.iter() {
         info!("Closing window {:?}", window);
-        // Guard to verify that the window is in fact actually gone,
-        // rather than having the component added and removed in the same frame.
-        if !window_entities.contains(window) {
-            winit_windows.remove_window(window);
-            close_events.send(WindowClosed { window });
-        }
+
+        winit_windows.remove_window(window);
+        close_events.send(WindowClosed { window });
     }
 }
 
-/// The cached state of the window so we can check which properties were changed from within the app.
+/// Previous state of the window so we can check sub-portions of what actually was changed.
 #[derive(Debug, Clone, Component)]
-pub struct CachedWindow {
-    pub window: Window,
+pub struct WinitWindowInfo {
+    pub previous: Window,
+    pub last_winit_size: PhysicalSize<u32>,
 }
 
 // Detect changes to the window and update the winit window accordingly.
@@ -115,16 +113,18 @@ pub struct CachedWindow {
 // - [`Window::canvas`] currently cannot be updated after startup, not entirely sure if it would work well with the
 //   event channel stuff.
 pub(crate) fn changed_window(
-    mut changed_windows: Query<(Entity, &mut Window, &mut CachedWindow), Changed<Window>>,
+    mut changed_windows: Query<(Entity, &mut Window, &mut WinitWindowInfo), Changed<Window>>,
     winit_windows: NonSendMut<WinitWindows>,
 ) {
-    for (entity, mut window, mut cache) in &mut changed_windows {
+    for (entity, mut window, mut info) in &mut changed_windows {
+        let previous = &info.previous;
+
         if let Some(winit_window) = winit_windows.get_window(entity) {
-            if window.title != cache.window.title {
+            if window.title != previous.title {
                 winit_window.set_title(window.title.as_str());
             }
 
-            if window.mode != cache.window.mode {
+            if window.mode != previous.mode {
                 let new_mode = match window.mode {
                     bevy_window::WindowMode::BorderlessFullscreen => {
                         Some(winit::window::Fullscreen::Borderless(None))
@@ -148,22 +148,26 @@ pub(crate) fn changed_window(
                     winit_window.set_fullscreen(new_mode);
                 }
             }
-            if window.resolution != cache.window.resolution {
+            if window.resolution != previous.resolution {
                 let physical_size = PhysicalSize::new(
                     window.resolution.physical_width(),
                     window.resolution.physical_height(),
                 );
-                winit_window.set_inner_size(physical_size);
+                // Prevents "window.resolution values set from a winit resize event" from
+                // being set here, creating feedback loops.
+                if physical_size != info.last_winit_size {
+                    winit_window.set_inner_size(physical_size);
+                }
             }
 
-            if window.physical_cursor_position() != cache.window.physical_cursor_position() {
-                if let Some(physical_position) = window.physical_cursor_position() {
+            if window.cursor.position != previous.cursor.position {
+                if let Some(physical_position) = window.cursor.position {
                     let inner_size = winit_window.inner_size();
 
                     let position = PhysicalPosition::new(
                         physical_position.x,
                         // Flip the coordinate space back to winit's context.
-                        inner_size.height as f32 - physical_position.y,
+                        inner_size.height as f64 - physical_position.y,
                     );
 
                     if let Err(err) = winit_window.set_cursor_position(position) {
@@ -172,21 +176,21 @@ pub(crate) fn changed_window(
                 }
             }
 
-            if window.cursor.icon != cache.window.cursor.icon {
+            if window.cursor.icon != previous.cursor.icon {
                 winit_window.set_cursor_icon(converters::convert_cursor_icon(window.cursor.icon));
             }
 
-            if window.cursor.grab_mode != cache.window.cursor.grab_mode {
+            if window.cursor.grab_mode != previous.cursor.grab_mode {
                 crate::winit_windows::attempt_grab(winit_window, window.cursor.grab_mode);
             }
 
-            if window.cursor.visible != cache.window.cursor.visible {
+            if window.cursor.visible != previous.cursor.visible {
                 winit_window.set_cursor_visible(window.cursor.visible);
             }
 
-            if window.cursor.hit_test != cache.window.cursor.hit_test {
+            if window.cursor.hit_test != previous.cursor.hit_test {
                 if let Err(err) = winit_window.set_cursor_hittest(window.cursor.hit_test) {
-                    window.cursor.hit_test = cache.window.cursor.hit_test;
+                    window.cursor.hit_test = previous.cursor.hit_test;
                     warn!(
                         "Could not set cursor hit test for window {:?}: {:?}",
                         window.title, err
@@ -194,19 +198,19 @@ pub(crate) fn changed_window(
                 }
             }
 
-            if window.decorations != cache.window.decorations
+            if window.decorations != previous.decorations
                 && window.decorations != winit_window.is_decorated()
             {
                 winit_window.set_decorations(window.decorations);
             }
 
-            if window.resizable != cache.window.resizable
+            if window.resizable != previous.resizable
                 && window.resizable != winit_window.is_resizable()
             {
                 winit_window.set_resizable(window.resizable);
             }
 
-            if window.resize_constraints != cache.window.resize_constraints {
+            if window.resize_constraints != previous.resize_constraints {
                 let constraints = window.resize_constraints.check_constraints();
                 let min_inner_size = LogicalSize {
                     width: constraints.min_width,
@@ -223,7 +227,7 @@ pub(crate) fn changed_window(
                 }
             }
 
-            if window.position != cache.window.position {
+            if window.position != previous.position {
                 if let Some(position) = crate::winit_window_position(
                     &window.position,
                     &window.resolution,
@@ -250,42 +254,31 @@ pub(crate) fn changed_window(
                 winit_window.set_minimized(minimized);
             }
 
-            if window.focused != cache.window.focused && window.focused {
+            if window.focused != previous.focused && window.focused {
                 winit_window.focus_window();
             }
 
-            if window.window_level != cache.window.window_level {
-                winit_window.set_window_level(convert_window_level(window.window_level));
+            if window.always_on_top != previous.always_on_top {
+                winit_window.set_always_on_top(window.always_on_top);
             }
 
             // Currently unsupported changes
-            if window.transparent != cache.window.transparent {
-                window.transparent = cache.window.transparent;
+            if window.transparent != previous.transparent {
+                window.transparent = previous.transparent;
                 warn!(
                     "Winit does not currently support updating transparency after window creation."
                 );
             }
 
             #[cfg(target_arch = "wasm32")]
-            if window.canvas != cache.window.canvas {
-                window.canvas = cache.window.canvas.clone();
+            if window.canvas != previous.canvas {
+                window.canvas = previous.canvas.clone();
                 warn!(
                     "Bevy currently doesn't support modifying the window canvas after initialization."
                 );
             }
 
-            if window.ime_enabled != cache.window.ime_enabled {
-                winit_window.set_ime_allowed(window.ime_enabled);
-            }
-
-            if window.ime_position != cache.window.ime_position {
-                winit_window.set_ime_position(LogicalPosition::new(
-                    window.ime_position.x,
-                    window.ime_position.y,
-                ));
-            }
-
-            cache.window = window.clone();
+            info.previous = window.clone();
         }
     }
 }

@@ -24,8 +24,7 @@ pub trait Plugin: Downcast + Any + Send + Sync {
         // do nothing
     }
 
-    /// Configures a name for the [`Plugin`] which is primarily used for checking plugin
-    /// uniqueness and debugging.
+    /// Configures a name for the [`Plugin`] which is primarily used for debugging.
     fn name(&self) -> &str {
         std::any::type_name::<Self>()
     }

@@ -1,6 +1,6 @@
 #import bevy_pbr::mesh_types
 #import bevy_pbr::mesh_view_bindings
-#import bevy_pbr::prepass_utils
+#import bevy_pbr::utils
 
 @group(1) @binding(0)
 var<uniform> show_depth: f32;

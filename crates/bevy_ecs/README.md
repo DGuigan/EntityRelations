@@ -111,10 +111,9 @@ The [`resources.rs`](examples/resources.rs) example illustrates how to read and 
 
 ### Schedules
 
-Schedules run a set of Systems according to some execution strategy.
-Systems can be added to any number of System Sets, which are used to control their scheduling metadata.
+Schedules consist of zero or more Stages, which run a set of Systems according to some execution strategy. Bevy ECS provides a few built in Stage implementations (ex: parallel, serial), but you can also implement your own! Schedules run Stages one-by-one in an order defined by the user.
 
-The built in "parallel executor" considers dependencies between systems and (by default) run as many of them in parallel as possible. This maximizes performance, while keeping the system execution safe. To control the system ordering, define explicit dependencies between systems and their sets.
+The built in "parallel stage" considers dependencies between systems and (by default) run as many of them in parallel as possible. This maximizes performance, while keeping the system execution safe. You can also define explicit dependencies between systems.
 
 ## Using Bevy ECS
 
@@ -149,8 +148,15 @@ fn main() {
     // Create a new Schedule, which defines an execution strategy for Systems
     let mut schedule = Schedule::default();
 
-    // Add our system to the schedule
-    schedule.add_system(movement);
+    // Define a unique public name for a new Stage.
+    #[derive(StageLabel)]
+    pub struct UpdateLabel;
+
+    // Add a Stage to our schedule. Each Stage in a schedule runs all of its systems
+    // before moving on to the next Stage
+    schedule.add_stage(UpdateLabel, SystemStage::parallel()
+        .with_system(movement)
+    );
 
     // Run the schedule once. If your app has a "loop", you would run this once per loop
     schedule.run(&mut world);

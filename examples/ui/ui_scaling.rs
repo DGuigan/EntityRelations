@@ -4,6 +4,9 @@ use bevy::{prelude::*, text::TextSettings, utils::Duration};
 
 const SCALE_TIME: u64 = 400;
 
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, SystemLabel)]
+struct ApplyScaling;
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -17,8 +20,8 @@ fn main() {
             target_time: Timer::new(Duration::from_millis(SCALE_TIME), TimerMode::Once),
         })
         .add_startup_system(setup)
-        .add_system(change_scaling)
-        .add_system(apply_scaling.after(change_scaling))
+        .add_system(apply_scaling.label(ApplyScaling))
+        .add_system(change_scaling.before(ApplyScaling))
         .run();
 }
 

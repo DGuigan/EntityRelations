@@ -1,6 +1,6 @@
 use bevy_app::{PluginGroup, PluginGroupBuilder};
 
-/// This plugin group will add all the default plugins for a *Bevy* application:
+/// This plugin group will add all the default plugins:
 /// * [`LogPlugin`](crate::log::LogPlugin)
 /// * [`TaskPoolPlugin`](crate::core::TaskPoolPlugin)
 /// * [`TypeRegistrationPlugin`](crate::core::TypeRegistrationPlugin)
@@ -23,13 +23,7 @@ use bevy_app::{PluginGroup, PluginGroupBuilder};
 /// * [`GltfPlugin`](crate::gltf::GltfPlugin) - with feature `bevy_gltf`
 /// * [`WinitPlugin`](crate::winit::WinitPlugin) - with feature `bevy_winit`
 ///
-/// [`DefaultPlugins`] obeys *Cargo* *feature* flags. Users may exert control over this plugin group
-/// by disabling `default-features` in their `Cargo.toml` and enabling only those features
-/// that they wish to use.
-///
-/// [`DefaultPlugins`] contains all the plugins typically required to build
-/// a *Bevy* application which includes a *window* and presentation components.
-/// For *headless* cases – without a *window* or presentation, see [`MinimalPlugins`].
+/// See also [`MinimalPlugins`] for a slimmed down option
 pub struct DefaultPlugins;
 
 impl PluginGroup for DefaultPlugins {
@@ -133,21 +127,14 @@ impl PluginGroup for DefaultPlugins {
     }
 }
 
-/// This plugin group will add the minimal plugins for a *Bevy* application:
+/// Minimal plugin group that will add the following plugins:
 /// * [`TaskPoolPlugin`](crate::core::TaskPoolPlugin)
 /// * [`TypeRegistrationPlugin`](crate::core::TypeRegistrationPlugin)
 /// * [`FrameCountPlugin`](crate::core::FrameCountPlugin)
 /// * [`TimePlugin`](crate::time::TimePlugin)
 /// * [`ScheduleRunnerPlugin`](crate::app::ScheduleRunnerPlugin)
 ///
-/// This group of plugins is intended for use for minimal, *headless* programs –
-/// see the [*Bevy* *headless* example](https://github.com/bevyengine/bevy/blob/main/examples/app/headless.rs)
-/// – and includes a [schedule runner (`ScheduleRunnerPlugin`)](crate::app::ScheduleRunnerPlugin)
-/// to provide functionality that would otherwise be driven by a windowed application's
-/// *event loop* or *message loop*.
-///
-/// Windowed applications that wish to use a reduced set of plugins should consider the
-/// [`DefaultPlugins`] plugin group which can be controlled with *Cargo* *feature* flags.
+/// See also [`DefaultPlugins`] for a more complete set of plugins
 pub struct MinimalPlugins;
 
 impl PluginGroup for MinimalPlugins {

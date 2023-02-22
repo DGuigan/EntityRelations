@@ -227,8 +227,7 @@ pub struct Style {
     pub flex_wrap: FlexWrap,
     /// How items are aligned according to the cross axis
     pub align_items: AlignItems,
-    /// How this item is aligned according to the cross axis.
-    /// Overrides [`AlignItems`].
+    /// Like align_items but for only this item
     pub align_self: AlignSelf,
     /// How to align each line, only applies if flex_wrap is set to
     /// [`FlexWrap::Wrap`] and there are multiple lines of items
@@ -249,20 +248,11 @@ pub struct Style {
     pub flex_shrink: f32,
     /// The initial size of the item
     pub flex_basis: Val,
-    /// The ideal size of the flexbox
-    ///
-    /// `size.width` is used when it is within the bounds defined by `min_size.width` and `max_size.width`.
-    /// `size.height` is used when it is within the bounds defined by `min_size.height` and `max_size.height`.
+    /// The size of the flexbox
     pub size: Size,
     /// The minimum size of the flexbox
-    ///
-    /// `min_size.width` is used if it is greater than either `size.width` or `max_size.width`, or both.
-    /// `min_size.height` is used if it is greater than either `size.height` or `max_size.height`, or both.
     pub min_size: Size,
     /// The maximum size of the flexbox
-    ///
-    /// `max_size.width` is used if it is within the bounds defined by `min_size.width` and `size.width`.
-    /// `max_size.height` is used if it is within the bounds defined by `min_size.height` and `size.height.
     pub max_size: Size,
     /// The aspect ratio of the flexbox
     pub aspect_ratio: Option<f32>,
@@ -333,22 +323,21 @@ impl Default for AlignItems {
     }
 }
 
-/// How this item is aligned according to the cross axis.
-/// Overrides [`AlignItems`].
+/// Works like [`AlignItems`] but applies only to a single item
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize, Reflect)]
 #[reflect(PartialEq, Serialize, Deserialize)]
 pub enum AlignSelf {
-    /// Use the parent node's [`AlignItems`] value to determine how this item should be aligned
+    /// Use the value of [`AlignItems`]
     Auto,
-    /// This item will be aligned at the start
+    /// If the parent has [`AlignItems::Center`] only this item will be at the start
     FlexStart,
-    /// This item will be aligned at the end
+    /// If the parent has [`AlignItems::Center`] only this item will be at the end
     FlexEnd,
-    /// This item will be aligned at the center
+    /// If the parent has [`AlignItems::FlexStart`] only this item will be at the center
     Center,
-    /// This item will be aligned at the baseline
+    /// If the parent has [`AlignItems::Center`] only this item will be at the baseline
     Baseline,
-    /// This item will be stretched across the whole cross axis
+    /// If the parent has [`AlignItems::Center`] only this item will stretch along the whole cross axis
     Stretch,
 }
 
@@ -563,15 +552,15 @@ impl Default for FlexWrap {
 #[derive(Component, Copy, Clone, Debug, Reflect)]
 #[reflect(Component)]
 pub struct CalculatedSize {
-    /// The size of the node in logical pixels
-    pub size: Vec2,
+    /// The size of the node
+    pub size: Size,
     /// Whether to attempt to preserve the aspect ratio when determining the layout for this item
     pub preserve_aspect_ratio: bool,
 }
 
 impl CalculatedSize {
     const DEFAULT: Self = Self {
-        size: Vec2::ZERO,
+        size: Size::DEFAULT,
         preserve_aspect_ratio: false,
     };
 }

@@ -115,7 +115,7 @@ impl From<&'static str> for SlotLabel {
 
 impl From<Cow<'static, str>> for SlotLabel {
     fn from(value: Cow<'static, str>) -> Self {
-        SlotLabel::Name(value)
+        SlotLabel::Name(value.clone())
     }
 }
 
@@ -188,7 +188,12 @@ impl SlotInfos {
         let label = label.into();
         match label {
             SlotLabel::Index(index) => Some(index),
-            SlotLabel::Name(ref name) => self.slots.iter().position(|s| s.name == *name),
+            SlotLabel::Name(ref name) => self
+                .slots
+                .iter()
+                .enumerate()
+                .find(|(_i, s)| s.name == *name)
+                .map(|(i, _s)| i),
         }
     }
 

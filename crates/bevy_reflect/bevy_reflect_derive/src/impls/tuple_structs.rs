@@ -1,6 +1,5 @@
 use crate::fq_std::{FQAny, FQBox, FQDefault, FQOption, FQResult};
 use crate::impls::impl_typed;
-use crate::utility::extend_where_clause;
 use crate::ReflectStruct;
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
@@ -12,6 +11,7 @@ pub(crate) fn impl_tuple_struct(reflect_struct: &ReflectStruct) -> TokenStream {
 
     let bevy_reflect_path = reflect_struct.meta().bevy_reflect_path();
     let struct_name = reflect_struct.meta().type_name();
+    let get_type_registration_impl = reflect_struct.get_type_registration();
 
     let field_idents = reflect_struct
         .active_fields()
@@ -20,9 +20,6 @@ pub(crate) fn impl_tuple_struct(reflect_struct: &ReflectStruct) -> TokenStream {
     let field_types = reflect_struct.active_types();
     let field_count = field_idents.len();
     let field_indices = (0..field_count).collect::<Vec<usize>>();
-
-    let where_clause_options = reflect_struct.where_clause_options();
-    let get_type_registration_impl = reflect_struct.get_type_registration(&where_clause_options);
 
     let hash_fn = reflect_struct
         .meta()
@@ -78,7 +75,6 @@ pub(crate) fn impl_tuple_struct(reflect_struct: &ReflectStruct) -> TokenStream {
     let typed_impl = impl_typed(
         struct_name,
         reflect_struct.meta().generics(),
-        &where_clause_options,
         quote! {
             let fields = [#field_generator];
             let info = #info_generator;
@@ -90,14 +86,12 @@ pub(crate) fn impl_tuple_struct(reflect_struct: &ReflectStruct) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) =
         reflect_struct.meta().generics().split_for_impl();
 
-    let where_reflect_clause = extend_where_clause(where_clause, &where_clause_options);
-
     TokenStream::from(quote! {
         #get_type_registration_impl
 
         #typed_impl
 
-        impl #impl_generics #bevy_reflect_path::TupleStruct for #struct_name #ty_generics #where_reflect_clause {
+        impl #impl_generics #bevy_reflect_path::TupleStruct for #struct_name #ty_generics #where_clause {
             fn field(&self, index: usize) -> #FQOption<&dyn #bevy_reflect_path::Reflect> {
                 match index {
                     #(#field_indices => #fqoption::Some(&self.#field_idents),)*
@@ -128,7 +122,7 @@ pub(crate) fn impl_tuple_struct(reflect_struct: &ReflectStruct) -> TokenStream {
             }
         }
 
-        impl #impl_generics #bevy_reflect_path::Reflect for #struct_name #ty_generics #where_reflect_clause {
+        impl #impl_generics #bevy_reflect_path::Reflect for #struct_name #ty_generics #where_clause {
             #[inline]
             fn type_name(&self) -> &str {
                 ::core::any::type_name::<Self>()

@@ -7,26 +7,17 @@ fn main() {
     App::new()
         .init_resource::<RpgSpriteHandles>()
         .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest())) // prevents blurry sprites
-        .add_state::<AppState>()
-        .add_system_to_schedule(OnEnter(AppState::Setup), load_textures)
-        .add_system(check_textures.in_set(OnUpdate(AppState::Setup)))
-        .add_system_to_schedule(OnEnter(AppState::Finished), setup)
+        .add_state(AppState::Setup)
+        .add_system_set(SystemSet::on_enter(AppState::Setup).with_system(load_textures))
+        .add_system_set(SystemSet::on_update(AppState::Setup).with_system(check_textures))
+        .add_system_set(SystemSet::on_enter(AppState::Finished).with_system(setup))
         .run();
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum AppState {
-    #[default]
     Setup,
     Finished,
-}
-
-impl States for AppState {
-    type Iter = std::array::IntoIter<AppState, 2>;
-
-    fn variants() -> Self::Iter {
-        [AppState::Setup, AppState::Finished].into_iter()
-    }
 }
 
 #[derive(Resource, Default)]
@@ -39,14 +30,14 @@ fn load_textures(mut rpg_sprite_handles: ResMut<RpgSpriteHandles>, asset_server:
 }
 
 fn check_textures(
-    mut next_state: ResMut<NextState<AppState>>,
+    mut state: ResMut<State<AppState>>,
     rpg_sprite_handles: ResMut<RpgSpriteHandles>,
     asset_server: Res<AssetServer>,
 ) {
     if let LoadState::Loaded = asset_server
         .get_group_load_state(rpg_sprite_handles.handles.iter().map(|handle| handle.id()))
     {
-        next_state.set(AppState::Finished);
+        state.set(AppState::Finished).unwrap();
     }
 }
 

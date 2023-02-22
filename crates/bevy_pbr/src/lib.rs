@@ -2,8 +2,6 @@ pub mod wireframe;
 
 mod alpha;
 mod bundle;
-mod environment_map;
-mod fog;
 mod light;
 mod material;
 mod pbr_material;
@@ -11,14 +9,15 @@ mod prepass;
 mod render;
 
 pub use alpha::*;
+use bevy_utils::default;
 pub use bundle::*;
-pub use environment_map::EnvironmentMapLight;
-pub use fog::*;
 pub use light::*;
 pub use material::*;
 pub use pbr_material::*;
 pub use prepass::*;
 pub use render::*;
+
+use bevy_window::ModifiesWindows;
 
 pub mod prelude {
     #[doc(hidden)]
@@ -28,8 +27,6 @@ pub mod prelude {
             DirectionalLightBundle, MaterialMeshBundle, PbrBundle, PointLightBundle,
             SpotLightBundle,
         },
-        environment_map::EnvironmentMapLight,
-        fog::{FogFalloff, FogSettings},
         light::{AmbientLight, DirectionalLight, PointLight, SpotLight},
         material::{Material, MaterialPlugin},
         pbr_material::StandardMaterial,
@@ -54,11 +51,10 @@ use bevy_render::{
     render_graph::RenderGraph,
     render_phase::{sort_phase_system, AddRenderCommand, DrawFunctions},
     render_resource::{Shader, SpecializedMeshPipelines},
-    view::{ViewSet, VisibilitySystems},
-    ExtractSchedule, RenderApp, RenderSet,
+    view::VisibilitySystems,
+    RenderApp, RenderStage,
 };
 use bevy_transform::TransformSystem;
-use environment_map::EnvironmentMapPlugin;
 
 pub const PBR_TYPES_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 1708015359337029744);
@@ -78,8 +74,6 @@ pub const PBR_PREPASS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 9407115064344201137);
 pub const PBR_FUNCTIONS_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 16550102964439850292);
-pub const PBR_AMBIENT_HANDLE: HandleUntyped =
-    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 2441520459096337034);
 pub const SHADOW_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 1836745567947005696);
 
@@ -137,12 +131,6 @@ impl Plugin for PbrPlugin {
             "render/pbr_functions.wgsl",
             Shader::from_wgsl
         );
-        load_internal_asset!(
-            app,
-            PBR_AMBIENT_HANDLE,
-            "render/pbr_ambient.wgsl",
-            Shader::from_wgsl
-        );
         load_internal_asset!(app, PBR_SHADER_HANDLE, "render/pbr.wgsl", Shader::from_wgsl);
         load_internal_asset!(
             app,
@@ -157,88 +145,74 @@ impl Plugin for PbrPlugin {
             Shader::from_wgsl
         );
 
-        app.register_asset_reflect::<StandardMaterial>()
-            .register_type::<AmbientLight>()
-            .register_type::<CascadeShadowConfig>()
-            .register_type::<Cascades>()
-            .register_type::<CascadesVisibleEntities>()
-            .register_type::<ClusterConfig>()
-            .register_type::<ClusterFarZMode>()
-            .register_type::<ClusterZConfig>()
-            .register_type::<CubemapVisibleEntities>()
+        app.register_type::<CubemapVisibleEntities>()
             .register_type::<DirectionalLight>()
-            .register_type::<DirectionalLightShadowMap>()
             .register_type::<PointLight>()
-            .register_type::<PointLightShadowMap>()
             .register_type::<SpotLight>()
+            .register_asset_reflect::<StandardMaterial>()
+            .register_type::<AmbientLight>()
+            .register_type::<DirectionalLightShadowMap>()
+            .register_type::<ClusterConfig>()
+            .register_type::<ClusterZConfig>()
+            .register_type::<ClusterFarZMode>()
+            .register_type::<PointLightShadowMap>()
             .add_plugin(MeshRenderPlugin)
             .add_plugin(MaterialPlugin::<StandardMaterial> {
                 prepass_enabled: self.prepass_enabled,
-                ..Default::default()
+                ..default()
             })
-            .add_plugin(EnvironmentMapPlugin)
             .init_resource::<AmbientLight>()
             .init_resource::<GlobalVisiblePointLights>()
             .init_resource::<DirectionalLightShadowMap>()
             .init_resource::<PointLightShadowMap>()
             .add_plugin(ExtractResourcePlugin::<AmbientLight>::default())
-            .configure_sets(
-                (
-                    SimulationLightSystems::AddClusters,
-                    SimulationLightSystems::AddClustersFlush
-                        .after(SimulationLightSystems::AddClusters)
-                        .before(SimulationLightSystems::AssignLightsToClusters),
-                    SimulationLightSystems::AssignLightsToClusters,
-                    SimulationLightSystems::CheckLightVisibility,
-                    SimulationLightSystems::UpdateDirectionalLightCascades,
-                    SimulationLightSystems::UpdateLightFrusta,
-                )
-                    .in_base_set(CoreSet::PostUpdate),
+            .add_system_to_stage(
+                CoreStage::PostUpdate,
+                // NOTE: Clusters need to have been added before update_clusters is run so
+                // add as an exclusive system
+                add_clusters
+                    .at_start()
+                    .label(SimulationLightSystems::AddClusters),
             )
-            .add_plugin(FogPlugin)
-            .add_system(add_clusters.in_set(SimulationLightSystems::AddClusters))
-            .add_system(apply_system_buffers.in_set(SimulationLightSystems::AddClustersFlush))
-            .add_system(
+            .add_system_to_stage(
+                CoreStage::PostUpdate,
                 assign_lights_to_clusters
-                    .in_set(SimulationLightSystems::AssignLightsToClusters)
+                    .label(SimulationLightSystems::AssignLightsToClusters)
                     .after(TransformSystem::TransformPropagate)
                     .after(VisibilitySystems::CheckVisibility)
-                    .after(CameraUpdateSystem),
+                    .after(CameraUpdateSystem)
+                    .after(ModifiesWindows),
             )
-            .add_system(
-                update_directional_light_cascades
-                    .in_set(SimulationLightSystems::UpdateDirectionalLightCascades)
-                    .after(TransformSystem::TransformPropagate)
-                    .after(CameraUpdateSystem),
-            )
-            .add_system(
+            .add_system_to_stage(
+                CoreStage::PostUpdate,
                 update_directional_light_frusta
-                    .in_set(SimulationLightSystems::UpdateLightFrusta)
+                    .label(SimulationLightSystems::UpdateLightFrusta)
                     // This must run after CheckVisibility because it relies on ComputedVisibility::is_visible()
                     .after(VisibilitySystems::CheckVisibility)
                     .after(TransformSystem::TransformPropagate)
-                    .after(SimulationLightSystems::UpdateDirectionalLightCascades)
                     // We assume that no entity will be both a directional light and a spot light,
                     // so these systems will run independently of one another.
                     // FIXME: Add an archetype invariant for this https://github.com/bevyengine/bevy/issues/1481.
                     .ambiguous_with(update_spot_light_frusta),
             )
-            .add_system(
+            .add_system_to_stage(
+                CoreStage::PostUpdate,
                 update_point_light_frusta
-                    .in_set(SimulationLightSystems::UpdateLightFrusta)
+                    .label(SimulationLightSystems::UpdateLightFrusta)
                     .after(TransformSystem::TransformPropagate)
                     .after(SimulationLightSystems::AssignLightsToClusters),
             )
-            .add_system(
+            .add_system_to_stage(
+                CoreStage::PostUpdate,
                 update_spot_light_frusta
-                    .in_set(SimulationLightSystems::UpdateLightFrusta)
+                    .label(SimulationLightSystems::UpdateLightFrusta)
                     .after(TransformSystem::TransformPropagate)
                     .after(SimulationLightSystems::AssignLightsToClusters),
             )
-            .add_system(
+            .add_system_to_stage(
+                CoreStage::PostUpdate,
                 check_light_mesh_visibility
-                    .in_set(SimulationLightSystems::CheckLightVisibility)
-                    .after(VisibilitySystems::CalculateBoundsFlush)
+                    .label(SimulationLightSystems::CheckLightVisibility)
                     .after(TransformSystem::TransformPropagate)
                     .after(SimulationLightSystems::UpdateLightFrusta)
                     // NOTE: This MUST be scheduled AFTER the core renderer visibility check
@@ -263,39 +237,36 @@ impl Plugin for PbrPlugin {
             Err(_) => return,
         };
 
-        // Extract the required data from the main world
         render_app
-            .configure_set(RenderLightSystems::PrepareLights.in_set(RenderSet::Prepare))
-            .configure_set(RenderLightSystems::PrepareClusters.in_set(RenderSet::Prepare))
-            .configure_set(RenderLightSystems::QueueShadows.in_set(RenderSet::Queue))
-            .add_systems_to_schedule(
-                ExtractSchedule,
-                (
-                    render::extract_clusters.in_set(RenderLightSystems::ExtractClusters),
-                    render::extract_lights.in_set(RenderLightSystems::ExtractLights),
-                ),
+            .add_system_to_stage(
+                RenderStage::Extract,
+                render::extract_clusters.label(RenderLightSystems::ExtractClusters),
             )
-            .add_system(
+            .add_system_to_stage(
+                RenderStage::Extract,
+                render::extract_lights.label(RenderLightSystems::ExtractLights),
+            )
+            .add_system_to_stage(
+                RenderStage::Prepare,
+                // this is added as an exclusive system because it contributes new views. it must run (and have Commands applied)
+                // _before_ the `prepare_views()` system is run. ideally this becomes a normal system when "stageless" features come out
                 render::prepare_lights
-                    .before(ViewSet::PrepareUniforms)
-                    .in_set(RenderLightSystems::PrepareLights),
+                    .at_start()
+                    .label(RenderLightSystems::PrepareLights),
             )
-            // A sync is needed after prepare_lights, before prepare_view_uniforms,
-            // because prepare_lights creates new views for shadow mapping
-            .add_system(
-                apply_system_buffers
-                    .in_set(RenderSet::Prepare)
-                    .after(RenderLightSystems::PrepareLights)
-                    .before(ViewSet::PrepareUniforms),
+            .add_system_to_stage(
+                RenderStage::Prepare,
+                // NOTE: This needs to run after prepare_lights. As prepare_lights is an exclusive system,
+                // just adding it to the non-exclusive systems in the Prepare stage means it runs after
+                // prepare_lights.
+                render::prepare_clusters.label(RenderLightSystems::PrepareClusters),
             )
-            .add_system(
-                render::prepare_clusters
-                    .after(render::prepare_lights)
-                    .in_set(RenderLightSystems::PrepareClusters),
+            .add_system_to_stage(
+                RenderStage::Queue,
+                render::queue_shadows.label(RenderLightSystems::QueueShadows),
             )
-            .add_system(render::queue_shadows.in_set(RenderLightSystems::QueueShadows))
-            .add_system(render::queue_shadow_view_bind_group.in_set(RenderSet::Queue))
-            .add_system(sort_phase_system::<Shadow>.in_set(RenderSet::PhaseSort))
+            .add_system_to_stage(RenderStage::Queue, render::queue_shadow_view_bind_group)
+            .add_system_to_stage(RenderStage::PhaseSort, sort_phase_system::<Shadow>)
             .init_resource::<ShadowPipeline>()
             .init_resource::<DrawFunctions<Shadow>>()
             .init_resource::<LightMeta>()

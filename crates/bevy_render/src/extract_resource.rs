@@ -1,15 +1,18 @@
 use std::marker::PhantomData;
 
 use bevy_app::{App, Plugin};
-use bevy_ecs::prelude::*;
+use bevy_ecs::change_detection::DetectChanges;
+#[cfg(debug_assertions)]
+use bevy_ecs::system::Local;
+use bevy_ecs::system::{Commands, Res, ResMut, Resource};
 pub use bevy_render_macros::ExtractResource;
 
-use crate::{Extract, ExtractSchedule, RenderApp};
+use crate::{Extract, RenderApp, RenderStage};
 
 /// Describes how a resource gets extracted for rendering.
 ///
 /// Therefore the resource is transferred from the "main world" into the "render world"
-/// in the [`ExtractSchedule`](crate::ExtractSchedule) step.
+/// in the [`RenderStage::Extract`](crate::RenderStage::Extract) step.
 pub trait ExtractResource: Resource {
     type Source: Resource;
 
@@ -19,7 +22,7 @@ pub trait ExtractResource: Resource {
 
 /// This plugin extracts the resources into the "render world".
 ///
-/// Therefore it sets up the[`ExtractSchedule`](crate::ExtractSchedule) step
+/// Therefore it sets up the [`RenderStage::Extract`](crate::RenderStage::Extract) step
 /// for the specified [`Resource`].
 pub struct ExtractResourcePlugin<R: ExtractResource>(PhantomData<R>);
 
@@ -32,7 +35,7 @@ impl<R: ExtractResource> Default for ExtractResourcePlugin<R> {
 impl<R: ExtractResource> Plugin for ExtractResourcePlugin<R> {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.add_system_to_schedule(ExtractSchedule, extract_resource::<R>);
+            render_app.add_system_to_stage(RenderStage::Extract, extract_resource::<R>);
         }
     }
 }

@@ -10,7 +10,7 @@ use bevy::prelude::*;
 
 fn main() {
     App::new()
-        .insert_resource(Msaa::default())
+        .insert_resource(Msaa { samples: 4 })
         .add_plugins(DefaultPlugins)
         .add_startup_system(setup)
         .add_system(cycle_msaa)
@@ -46,15 +46,12 @@ fn setup(
 
 fn cycle_msaa(input: Res<Input<KeyCode>>, mut msaa: ResMut<Msaa>) {
     if input.just_pressed(KeyCode::M) {
-        match *msaa {
-            Msaa::Sample4 => {
-                info!("Not using MSAA");
-                *msaa = Msaa::Off;
-            }
-            Msaa::Off => {
-                info!("Using 4x MSAA");
-                *msaa = Msaa::Sample4;
-            }
+        if msaa.samples == 4 {
+            info!("Not using MSAA");
+            msaa.samples = 1;
+        } else {
+            info!("Using 4x MSAA");
+            msaa.samples = 4;
         }
     }
 }

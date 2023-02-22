@@ -11,19 +11,10 @@
 
 use bevy::prelude::*;
 
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 enum AppState {
-    #[default]
     MainMenu,
     InGame,
-}
-
-impl States for AppState {
-    type Iter = std::array::IntoIter<AppState, 2>;
-
-    fn variants() -> Self::Iter {
-        [AppState::MainMenu, AppState::InGame].into_iter()
-    }
 }
 
 #[derive(Component)]
@@ -41,17 +32,20 @@ struct LevelUnload;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_state::<AppState>()
+        .add_state(AppState::MainMenu)
         .add_startup_system(setup_system)
         .add_system(print_text_system)
-        .add_system(transition_to_in_game_system.in_set(OnUpdate(AppState::MainMenu)))
-        // add the cleanup systems
-        .add_system_to_schedule(
-            OnExit(AppState::MainMenu),
-            // Pass in the types your system should operate on using the ::<T> (turbofish) syntax
-            cleanup_system::<MenuClose>,
+        .add_system_set(
+            SystemSet::on_update(AppState::MainMenu).with_system(transition_to_in_game_system),
         )
-        .add_system_to_schedule(OnExit(AppState::InGame), cleanup_system::<LevelUnload>)
+        // add the cleanup systems
+        .add_system_set(
+            // Pass in the types your system should operate on using the ::<T> (turbofish) syntax
+            SystemSet::on_exit(AppState::MainMenu).with_system(cleanup_system::<MenuClose>),
+        )
+        .add_system_set(
+            SystemSet::on_exit(AppState::InGame).with_system(cleanup_system::<LevelUnload>),
+        )
         .run();
 }
 
@@ -78,11 +72,11 @@ fn print_text_system(time: Res<Time>, mut query: Query<(&mut PrinterTick, &TextT
 }
 
 fn transition_to_in_game_system(
-    mut next_state: ResMut<NextState<AppState>>,
+    mut state: ResMut<State<AppState>>,
     keyboard_input: Res<Input<KeyCode>>,
 ) {
     if keyboard_input.pressed(KeyCode::Space) {
-        next_state.set(AppState::InGame);
+        state.set(AppState::InGame).unwrap();
     }
 }
 

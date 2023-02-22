@@ -2,12 +2,11 @@
 
 use std::f32::consts::PI;
 
-use bevy::prelude::*;
+use bevy::{ecs::schedule::SystemSet, prelude::*};
 use rand::Rng;
 
-#[derive(Clone, Eq, PartialEq, Debug, Hash, Default, States)]
+#[derive(Clone, Eq, PartialEq, Debug, Hash)]
 enum GameState {
-    #[default]
     Playing,
     GameOver,
 }
@@ -23,23 +22,21 @@ fn main() {
             TimerMode::Repeating,
         )))
         .add_plugins(DefaultPlugins)
-        .add_state::<GameState>()
+        .add_state(GameState::Playing)
         .add_startup_system(setup_cameras)
-        .add_system_to_schedule(OnEnter(GameState::Playing), setup)
-        .add_systems(
-            (
-                move_player,
-                focus_camera,
-                rotate_bonus,
-                scoreboard_system,
-                spawn_bonus,
-            )
-                .in_set(OnUpdate(GameState::Playing)),
+        .add_system_set(SystemSet::on_enter(GameState::Playing).with_system(setup))
+        .add_system_set(
+            SystemSet::on_update(GameState::Playing)
+                .with_system(move_player)
+                .with_system(focus_camera)
+                .with_system(rotate_bonus)
+                .with_system(scoreboard_system)
+                .with_system(spawn_bonus),
         )
-        .add_system_to_schedule(OnExit(GameState::Playing), teardown)
-        .add_system_to_schedule(OnEnter(GameState::GameOver), display_score)
-        .add_system(gameover_keyboard.in_set(OnUpdate(GameState::GameOver)))
-        .add_system_to_schedule(OnExit(GameState::GameOver), teardown)
+        .add_system_set(SystemSet::on_exit(GameState::Playing).with_system(teardown))
+        .add_system_set(SystemSet::on_enter(GameState::GameOver).with_system(display_score))
+        .add_system_set(SystemSet::on_update(GameState::GameOver).with_system(gameover_keyboard))
+        .add_system_set(SystemSet::on_exit(GameState::GameOver).with_system(teardown))
         .add_system(bevy::window::close_on_esc)
         .run();
 }
@@ -299,7 +296,7 @@ fn focus_camera(
 fn spawn_bonus(
     time: Res<Time>,
     mut timer: ResMut<BonusSpawnTimer>,
-    mut next_state: ResMut<NextState<GameState>>,
+    mut state: ResMut<State<GameState>>,
     mut commands: Commands,
     mut game: ResMut<Game>,
 ) {
@@ -313,7 +310,8 @@ fn spawn_bonus(
         commands.entity(entity).despawn_recursive();
         game.bonus.entity = None;
         if game.score <= -5 {
-            next_state.set(GameState::GameOver);
+            // We don't particularly care if this operation fails
+            let _ = state.overwrite_set(GameState::GameOver);
             return;
         }
     }
@@ -371,12 +369,9 @@ fn scoreboard_system(game: Res<Game>, mut query: Query<&mut Text>) {
 }
 
 // restart the game when pressing spacebar
-fn gameover_keyboard(
-    mut next_state: ResMut<NextState<GameState>>,
-    keyboard_input: Res<Input<KeyCode>>,
-) {
+fn gameover_keyboard(mut state: ResMut<State<GameState>>, keyboard_input: Res<Input<KeyCode>>) {
     if keyboard_input.just_pressed(KeyCode::Space) {
-        next_state.set(GameState::Playing);
+        state.set(GameState::Playing).unwrap();
     }
 }
 
