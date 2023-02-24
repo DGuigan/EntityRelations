@@ -1,8 +1,6 @@
 use std::borrow::Cow;
 
-pub use wgpu::{
-    Backends, Dx12Compiler, Features as WgpuFeatures, Limits as WgpuLimits, PowerPreference,
-};
+pub use wgpu::{Backends, Features as WgpuFeatures, Limits as WgpuLimits, PowerPreference};
 
 /// Configures the priority used when automatically configuring the features/limits of `wgpu`.
 #[derive(Clone)]
@@ -39,8 +37,6 @@ pub struct WgpuSettings {
     pub limits: WgpuLimits,
     /// The constraints on limits allowed regardless of what the adapter/backend supports
     pub constrained_limits: Option<WgpuLimits>,
-    /// The shader compiler to use for the DX12 backend.
-    pub dx12_shader_compiler: Dx12Compiler,
 }
 
 impl Default for WgpuSettings {
@@ -48,7 +44,7 @@ impl Default for WgpuSettings {
         let default_backends = if cfg!(feature = "webgl") {
             Backends::GL
         } else {
-            Backends::all()
+            Backends::PRIMARY
         };
 
         let backends = Some(wgpu::util::backend_bits_from_env().unwrap_or(default_backends));
@@ -69,12 +65,6 @@ impl Default for WgpuSettings {
             limits
         };
 
-        let dx12_compiler =
-            wgpu::util::dx12_shader_compiler_from_env().unwrap_or(Dx12Compiler::Dxc {
-                dxil_path: None,
-                dxc_path: None,
-            });
-
         Self {
             device_label: Default::default(),
             backends,
@@ -84,7 +74,6 @@ impl Default for WgpuSettings {
             disabled_features: None,
             limits,
             constrained_limits: None,
-            dx12_shader_compiler: dx12_compiler,
         }
     }
 }

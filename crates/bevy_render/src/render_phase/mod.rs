@@ -10,11 +10,11 @@
 //!
 //! To draw an entity, a corresponding [`PhaseItem`] has to be added to one or multiple of these
 //! render phases for each view that it is visible in.
-//! This must be done in the [`RenderSet::Queue`](crate::RenderSet::Queue).
+//! This must be done in the [`RenderStage::Queue`](crate::RenderStage::Queue).
 //! After that the render phase sorts them in the
-//! [`RenderSet::PhaseSort`](crate::RenderSet::PhaseSort).
+//! [`RenderStage::PhaseSort`](crate::RenderStage::PhaseSort).
 //! Finally the items are rendered using a single [`TrackedRenderPass`], during the
-//! [`RenderSet::Render`](crate::RenderSet::Render).
+//! [`RenderStage::Render`](crate::RenderStage::Render).
 //!
 //! Therefore each phase item is assigned a [`Draw`] function.
 //! These set up the state of the [`TrackedRenderPass`] (i.e. select the
@@ -122,13 +122,13 @@ impl<I: BatchedPhaseItem> RenderPhase<I> {
 /// as part of a [`RenderPhase`].
 ///
 /// The data required for rendering an entity is extracted from the main world in the
-/// [`ExtractSchedule`](crate::ExtractSchedule).
+/// [`RenderStage::Extract`](crate::RenderStage::Extract).
 /// Then it has to be queued up for rendering during the
-/// [`RenderSet::Queue`](crate::RenderSet::Queue), by adding a corresponding phase item to
+/// [`RenderStage::Queue`](crate::RenderStage::Queue), by adding a corresponding phase item to
 /// a render phase.
 /// Afterwards it will be sorted and rendered automatically in the
-/// [`RenderSet::PhaseSort`](crate::RenderSet::PhaseSort) and
-/// [`RenderSet::Render`](crate::RenderSet::Render), respectively.
+/// [`RenderStage::PhaseSort`](crate::RenderStage::PhaseSort) and
+/// [`RenderStage::Render`](crate::RenderStage::Render), respectively.
 pub trait PhaseItem: Sized + Send + Sync + 'static {
     /// The type used for ordering the items. The smallest values are drawn first.
     /// This order can be calculated using the [`ViewRangefinder3d`],

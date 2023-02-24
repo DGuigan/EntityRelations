@@ -124,18 +124,19 @@ impl<'w> DynamicSceneBuilder<'w> {
                 components: Vec::new(),
             };
 
-            let entity = self.original_world.entity(entity);
-            for component_id in entity.archetype().components() {
+            for component_id in self.original_world.entity(entity).archetype().components() {
                 let reflect_component = self
                     .original_world
                     .components()
                     .get_info(component_id)
                     .and_then(|info| type_registry.get(info.type_id().unwrap()))
-                    .and_then(|registration| registration.data::<ReflectComponent>())
-                    .and_then(|reflect_component| reflect_component.reflect(entity));
+                    .and_then(|registration| registration.data::<ReflectComponent>());
 
                 if let Some(reflect_component) = reflect_component {
-                    entry.components.push(reflect_component.clone_value());
+                    if let Some(component) = reflect_component.reflect(self.original_world, entity)
+                    {
+                        entry.components.push(component.clone_value());
+                    }
                 }
             }
             self.extracted_scene.insert(index, entry);

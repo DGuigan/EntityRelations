@@ -145,13 +145,13 @@ fn main() {
         // Build examples and check they compile
         cmd!(sh, "cargo check --workspace --examples")
             .run()
-            .expect("Please fix compiler errors for examples in output above.");
+            .expect("Please fix failing doc-tests in output above.");
     }
 
     if what_to_run.contains(Check::COMPILE_CHECK) {
-        // Build bevy and check that it compiles
+        // Build examples and check they compile
         cmd!(sh, "cargo check --workspace")
             .run()
-            .expect("Please fix compiler errors in output above.");
+            .expect("Please fix failing doc-tests in output above.");
     }
 }

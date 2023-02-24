@@ -172,3 +172,6 @@ pub mod dynamic_plugin {
     //! Dynamic linking of plugins
     pub use bevy_dynamic_plugin::*;
 }
+
+#[cfg(target_os = "android")]
+pub use ndk_glue;

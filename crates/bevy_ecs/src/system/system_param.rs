@@ -3,12 +3,12 @@ use crate::{
     archetype::{Archetype, Archetypes},
     bundle::Bundles,
     change_detection::{Ticks, TicksMut},
-    component::{ComponentId, ComponentTicks, Components},
-    entity::Entities,
+    component::{Component, ComponentId, ComponentTicks, Components},
+    entity::{Entities, Entity},
     query::{
         Access, FilteredAccess, FilteredAccessSet, QueryState, ReadOnlyWorldQuery, WorldQuery,
     },
-    system::{Query, SystemMeta},
+    system::{CommandQueue, Commands, Query, SystemMeta},
     world::{FromWorld, World},
 };
 pub use bevy_ecs_macros::Resource;
@@ -19,6 +19,7 @@ use bevy_utils::synccell::SyncCell;
 use std::{
     borrow::Cow,
     fmt::Debug,
+    marker::PhantomData,
     ops::{Deref, DerefMut},
 };
 
@@ -123,11 +124,8 @@ use std::{
 ///
 /// # Safety
 ///
-/// The implementor must ensure the following is true.
-/// - [`SystemParam::init_state`] correctly registers all [`World`] accesses used
-///   by [`SystemParam::get_param`] with the provided [`system_meta`](SystemMeta).
-/// - None of the world accesses may conflict with any prior accesses registered
-///   on `system_meta`.
+/// The implementor must ensure that [`SystemParam::init_state`] correctly registers all
+/// [`World`] accesses used by this [`SystemParam`] with the provided [`system_meta`](SystemMeta).
 pub unsafe trait SystemParam: Sized {
     /// Used to store data which persists across invocations of a system.
     type State: Send + Sync + 'static;
@@ -152,9 +150,7 @@ pub unsafe trait SystemParam: Sized {
     }
 
     /// Applies any deferred mutations stored in this [`SystemParam`]'s state.
-    /// This is used to apply [`Commands`] during [`apply_system_buffers`](crate::prelude::apply_system_buffers).
-    ///
-    /// [`Commands`]: crate::prelude::Commands
+    /// This is used to apply [`Commands`] at the end of a stage.
     #[inline]
     #[allow(unused_variables)]
     fn apply(state: &mut Self::State, system_meta: &SystemMeta, world: &mut World) {}
@@ -162,9 +158,7 @@ pub unsafe trait SystemParam: Sized {
     /// # Safety
     ///
     /// This call might use any of the [`World`] accesses that were registered in [`Self::init_state`].
-    /// - None of those accesses may conflict with any other [`SystemParam`]s
-    ///   that exist at the same time, including those on other threads.
-    /// - `world` must be the same `World` that was used to initialize [`state`](SystemParam::init_state).
+    /// You must ensure that none of those accesses conflict with any other [`SystemParam`]s running in parallel with this one.
     unsafe fn get_param<'world, 'state>(
         state: &'state mut Self::State,
         system_meta: &SystemMeta,
@@ -386,7 +380,8 @@ impl_param_set!();
 ///
 /// ```
 /// # let mut world = World::default();
-/// # let mut schedule = Schedule::new();
+/// # let mut schedule = Schedule::default();
+/// # schedule.add_stage("update", SystemStage::parallel());
 /// # use bevy_ecs::prelude::*;
 /// #[derive(Resource)]
 /// struct MyResource { value: u32 }
@@ -402,9 +397,9 @@ impl_param_set!();
 ///     resource.value = 0;
 ///     assert_eq!(resource.value, 0);
 /// }
-/// # schedule.add_system(read_resource_system);
-/// # schedule.add_system(write_resource_system.after(read_resource_system));
-/// # schedule.run(&mut world);
+/// # schedule.add_system_to_stage("update", read_resource_system.label("first"));
+/// # schedule.add_system_to_stage("update", write_resource_system.after("first"));
+/// # schedule.run_once(&mut world);
 /// ```
 pub trait Resource: Send + Sync + 'static {}
 
@@ -448,7 +443,6 @@ unsafe impl<'a, T: Resource> SystemParam for Res<'a, T> {
         change_tick: u32,
     ) -> Self::Item<'w, 's> {
         let (ptr, ticks) = world
-            .as_unsafe_world_cell_migration_internal()
             .get_resource_with_ticks(component_id)
             .unwrap_or_else(|| {
                 panic!(
@@ -489,7 +483,6 @@ unsafe impl<'a, T: Resource> SystemParam for Option<Res<'a, T>> {
         change_tick: u32,
     ) -> Self::Item<'w, 's> {
         world
-            .as_unsafe_world_cell_migration_internal()
             .get_resource_with_ticks(component_id)
             .map(|(ptr, ticks)| Res {
                 value: ptr.deref(),
@@ -543,8 +536,7 @@ unsafe impl<'a, T: Resource> SystemParam for ResMut<'a, T> {
         change_tick: u32,
     ) -> Self::Item<'w, 's> {
         let value = world
-            .as_unsafe_world_cell_migration_internal()
-            .get_resource_mut_by_id(component_id)
+            .get_resource_unchecked_mut_with_id(component_id)
             .unwrap_or_else(|| {
                 panic!(
                     "Resource requested by {} does not exist: {}",
@@ -553,7 +545,7 @@ unsafe impl<'a, T: Resource> SystemParam for ResMut<'a, T> {
                 )
             });
         ResMut {
-            value: value.value.deref_mut::<T>(),
+            value: value.value,
             ticks: TicksMut {
                 added: value.ticks.added,
                 changed: value.ticks.changed,
@@ -581,10 +573,9 @@ unsafe impl<'a, T: Resource> SystemParam for Option<ResMut<'a, T>> {
         change_tick: u32,
     ) -> Self::Item<'w, 's> {
         world
-            .as_unsafe_world_cell_migration_internal()
-            .get_resource_mut_by_id(component_id)
+            .get_resource_unchecked_mut_with_id(component_id)
             .map(|value| ResMut {
-                value: value.value.deref_mut::<T>(),
+                value: value.value,
                 ticks: TicksMut {
                     added: value.ticks.added,
                     changed: value.ticks.changed,
@@ -592,6 +583,37 @@ unsafe impl<'a, T: Resource> SystemParam for Option<ResMut<'a, T>> {
                     change_tick,
                 },
             })
+    }
+}
+
+// SAFETY: Commands only accesses internal state
+unsafe impl<'w, 's> ReadOnlySystemParam for Commands<'w, 's> {}
+
+// SAFETY: only local state is accessed
+unsafe impl SystemParam for Commands<'_, '_> {
+    type State = CommandQueue;
+    type Item<'w, 's> = Commands<'w, 's>;
+
+    fn init_state(_world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {
+        Default::default()
+    }
+
+    fn apply(state: &mut Self::State, _system_meta: &SystemMeta, world: &mut World) {
+        #[cfg(feature = "trace")]
+        let _system_span =
+            bevy_utils::tracing::info_span!("system_commands", name = _system_meta.name())
+                .entered();
+        state.apply(world);
+    }
+
+    #[inline]
+    unsafe fn get_param<'w, 's>(
+        state: &'s mut Self::State,
+        _system_meta: &SystemMeta,
+        world: &'w World,
+        _change_tick: u32,
+    ) -> Self::Item<'w, 's> {
+        Commands::new(state, world)
     }
 }
 
@@ -758,178 +780,86 @@ unsafe impl<'a, T: FromWorld + Send + 'static> SystemParam for Local<'a, T> {
     }
 }
 
-/// Types that can be used with [`Deferred<T>`] in systems.
-/// This allows storing system-local data which is used to defer [`World`] mutations.
+/// A [`SystemParam`] that grants access to the entities that had their `T` [`Component`] removed.
 ///
-/// Types that implement `SystemBuffer` should take care to perform as many
-/// computations up-front as possible. Buffers cannot be applied in parallel,
-/// so you should try to minimize the time spent in [`SystemBuffer::apply`].
-pub trait SystemBuffer: FromWorld + Send + 'static {
-    /// Applies any deferred mutations to the [`World`].
-    fn apply(&mut self, system_meta: &SystemMeta, world: &mut World);
-}
-
-/// A [`SystemParam`] that stores a buffer which gets applied to the [`World`] at the end of a stage.
-/// This is used internally by [`Commands`] to defer `World` mutations.
+/// Note that this does not allow you to see which data existed before removal.
+/// If you need this, you will need to track the component data value on your own,
+/// using a regularly scheduled system that requests `Query<(Entity, &T), Changed<T>>`
+/// and stores the data somewhere safe to later cross-reference.
 ///
-/// [`Commands`]: crate::system::Commands
+/// If you are using `bevy_ecs` as a standalone crate,
+/// note that the `RemovedComponents` list will not be automatically cleared for you,
+/// and will need to be manually flushed using [`World::clear_trackers`]
+///
+/// For users of `bevy` and `bevy_app`, this is automatically done in `bevy_app::App::update`.
+/// For the main world, [`World::clear_trackers`] is run after the main schedule is run and after
+/// `SubApp`'s have run.
 ///
 /// # Examples
 ///
-/// By using this type to defer mutations, you can avoid mutable `World` access within
-/// a system, which allows it to run in parallel with more systems.
-///
-/// Note that deferring mutations is *not* free, and should only be used if
-/// the gains in parallelization outweigh the time it takes to apply deferred mutations.
-/// In general, [`Deferred`] should only be used for mutations that are infrequent,
-/// or which otherwise take up a small portion of a system's run-time.
+/// Basic usage:
 ///
 /// ```
-/// # use bevy_ecs::prelude::*;
-/// // Tracks whether or not there is a threat the player should be aware of.
-/// #[derive(Resource, Default)]
-/// pub struct Alarm(bool);
+/// # use bevy_ecs::component::Component;
+/// # use bevy_ecs::system::IntoSystem;
+/// # use bevy_ecs::system::RemovedComponents;
+/// #
+/// # #[derive(Component)]
+/// # struct MyComponent;
 ///
-/// #[derive(Component)]
-/// pub struct Settlement {
-///     // ...
+/// fn react_on_removal(removed: RemovedComponents<MyComponent>) {
+///     removed.iter().for_each(|removed_entity| println!("{:?}", removed_entity));
 /// }
 ///
-/// // A threat from inside the settlement.
-/// #[derive(Component)]
-/// pub struct Criminal;
-///
-/// // A threat from outside the settlement.
-/// #[derive(Component)]
-/// pub struct Monster;
-///
-/// # impl Criminal { pub fn is_threat(&self, _: &Settlement) -> bool { true } }
-///
-/// use bevy_ecs::system::{Deferred, SystemBuffer, SystemMeta};
-///
-/// // Uses deferred mutations to allow signalling the alarm from multiple systems in parallel.
-/// #[derive(Resource, Default)]
-/// struct AlarmFlag(bool);
-///
-/// impl AlarmFlag {
-///     /// Sounds the alarm at the end of the current stage.
-///     pub fn flag(&mut self) {
-///         self.0 = true;
-///     }
-/// }
-///
-/// impl SystemBuffer for AlarmFlag {
-///     // When `AlarmFlag` is used in a system, this function will get
-///     // called at the end of the system's stage.
-///     fn apply(&mut self, system_meta: &SystemMeta, world: &mut World) {
-///         if self.0 {
-///             world.resource_mut::<Alarm>().0 = true;
-///             self.0 = false;
-///         }
-///     }
-/// }
-///
-/// // Sound the alarm if there are any criminals who pose a threat.
-/// fn alert_criminal(
-///     settlements: Query<&Settlement>,
-///     criminals: Query<&Criminal>,
-///     mut alarm: Deferred<AlarmFlag>
-/// ) {
-///     let settlement = settlements.single();
-///     for criminal in &criminals {
-///         // Only sound the alarm if the criminal is a threat.
-///         // For this example, assume that this check is expensive to run.
-///         // Since the majority of this system's run-time is dominated
-///         // by calling `is_threat()`, we defer sounding the alarm to
-///         // allow this system to run in parallel with other alarm systems.
-///         if criminal.is_threat(settlement) {
-///             alarm.flag();
-///         }
-///     }
-/// }
-///
-/// // Sound the alarm if there is a monster.
-/// fn alert_monster(
-///     monsters: Query<&Monster>,
-///     mut alarm: ResMut<Alarm>
-/// ) {
-///     if monsters.iter().next().is_some() {
-///         // Since this system does nothing except for sounding the alarm,
-///         // it would be pointless to defer it, so we sound the alarm directly.
-///         alarm.0 = true;
-///     }
-/// }
-///
-/// let mut world = World::new();
-/// world.init_resource::<Alarm>();
-/// world.spawn(Settlement {
-///     // ...
-/// });
-///
-/// let mut schedule = Schedule::new();
-/// schedule
-///     // These two systems have no conflicts and will run in parallel.
-///     .add_system(alert_criminal)
-///     .add_system(alert_monster);
-///
-/// // There are no criminals or monsters, so the alarm is not sounded.
-/// schedule.run(&mut world);
-/// assert_eq!(world.resource::<Alarm>().0, false);
-///
-/// // Spawn a monster, which will cause the alarm to be sounded.
-/// let m_id = world.spawn(Monster).id();
-/// schedule.run(&mut world);
-/// assert_eq!(world.resource::<Alarm>().0, true);
-///
-/// // Remove the monster and reset the alarm.
-/// world.entity_mut(m_id).despawn();
-/// world.resource_mut::<Alarm>().0 = false;
-///
-/// // Spawn a criminal, which will cause the alarm to be sounded.
-/// world.spawn(Criminal);
-/// schedule.run(&mut world);
-/// assert_eq!(world.resource::<Alarm>().0, true);
+/// # bevy_ecs::system::assert_is_system(react_on_removal);
 /// ```
-pub struct Deferred<'a, T: SystemBuffer>(pub(crate) &'a mut T);
+pub struct RemovedComponents<'a, T: Component> {
+    world: &'a World,
+    component_id: ComponentId,
+    marker: PhantomData<T>,
+}
 
-impl<'a, T: SystemBuffer> Deref for Deferred<'a, T> {
-    type Target = T;
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        self.0
+impl<'a, T: Component> RemovedComponents<'a, T> {
+    /// Returns an iterator over the entities that had their `T` [`Component`] removed.
+    pub fn iter(&self) -> std::iter::Cloned<std::slice::Iter<'_, Entity>> {
+        self.world.removed_with_id(self.component_id)
     }
 }
 
-impl<'a, T: SystemBuffer> DerefMut for Deferred<'a, T> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0
+impl<'a, T: Component> IntoIterator for &'a RemovedComponents<'a, T> {
+    type Item = Entity;
+    type IntoIter = std::iter::Cloned<std::slice::Iter<'a, Entity>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
-// SAFETY: Only local state is accessed.
-unsafe impl<T: SystemBuffer> ReadOnlySystemParam for Deferred<'_, T> {}
+// SAFETY: Only reads World components
+unsafe impl<'a, T: Component> ReadOnlySystemParam for RemovedComponents<'a, T> {}
 
-// SAFETY: Only local state is accessed.
-unsafe impl<T: SystemBuffer> SystemParam for Deferred<'_, T> {
-    type State = SyncCell<T>;
-    type Item<'w, 's> = Deferred<'s, T>;
+// SAFETY: no component access. removed component entity collections can be read in parallel and are
+// never mutably borrowed during system execution
+unsafe impl<'a, T: Component> SystemParam for RemovedComponents<'a, T> {
+    type State = ComponentId;
+    type Item<'w, 's> = RemovedComponents<'w, T>;
 
     fn init_state(world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {
-        SyncCell::new(T::from_world(world))
+        world.init_component::<T>()
     }
 
-    fn apply(state: &mut Self::State, system_meta: &SystemMeta, world: &mut World) {
-        state.get().apply(system_meta, world);
-    }
-
+    #[inline]
     unsafe fn get_param<'w, 's>(
-        state: &'s mut Self::State,
+        &mut component_id: &'s mut Self::State,
         _system_meta: &SystemMeta,
-        _world: &'w World,
+        world: &'w World,
         _change_tick: u32,
     ) -> Self::Item<'w, 's> {
-        Deferred(state.get())
+        RemovedComponents {
+            world,
+            component_id,
+            marker: PhantomData,
+        }
     }
 }
 
@@ -1037,7 +967,6 @@ unsafe impl<'a, T: 'static> SystemParam for NonSend<'a, T> {
         change_tick: u32,
     ) -> Self::Item<'w, 's> {
         let (ptr, ticks) = world
-            .as_unsafe_world_cell_migration_internal()
             .get_non_send_with_ticks(component_id)
             .unwrap_or_else(|| {
                 panic!(
@@ -1076,7 +1005,6 @@ unsafe impl<T: 'static> SystemParam for Option<NonSend<'_, T>> {
         change_tick: u32,
     ) -> Self::Item<'w, 's> {
         world
-            .as_unsafe_world_cell_migration_internal()
             .get_non_send_with_ticks(component_id)
             .map(|(ptr, ticks)| NonSend {
                 value: ptr.deref(),
@@ -1129,7 +1057,6 @@ unsafe impl<'a, T: 'static> SystemParam for NonSendMut<'a, T> {
         change_tick: u32,
     ) -> Self::Item<'w, 's> {
         let (ptr, ticks) = world
-            .as_unsafe_world_cell_migration_internal()
             .get_non_send_with_ticks(component_id)
             .unwrap_or_else(|| {
                 panic!(
@@ -1162,7 +1089,6 @@ unsafe impl<'a, T: 'static> SystemParam for Option<NonSendMut<'a, T>> {
         change_tick: u32,
     ) -> Self::Item<'w, 's> {
         world
-            .as_unsafe_world_cell_migration_internal()
             .get_non_send_with_ticks(component_id)
             .map(|(ptr, ticks)| NonSendMut {
                 value: ptr.assert_unique().deref_mut(),
@@ -1379,6 +1305,7 @@ unsafe impl<'s> ReadOnlySystemParam for SystemName<'s> {}
 
 macro_rules! impl_system_param_tuple {
     ($($param: ident),*) => {
+
         // SAFETY: tuple consists only of ReadOnlySystemParams
         unsafe impl<$($param: ReadOnlySystemParam),*> ReadOnlySystemParam for ($($param,)*) {}
 
@@ -1549,9 +1476,8 @@ mod tests {
         query::{ReadOnlyWorldQuery, WorldQuery},
         system::Query,
     };
-    use std::marker::PhantomData;
 
-    // Compile test for https://github.com/bevyengine/bevy/pull/2838.
+    // Compile test for #2838
     #[derive(SystemParam)]
     pub struct SpecialQuery<
         'w,
@@ -1561,8 +1487,6 @@ mod tests {
     > {
         _query: Query<'w, 's, Q, F>,
     }
-
-    // Compile tests for https://github.com/bevyengine/bevy/pull/6694.
 
     #[derive(SystemParam)]
     pub struct SpecialRes<'w, T: Resource> {
@@ -1577,11 +1501,9 @@ mod tests {
     #[derive(Resource)]
     pub struct R<const I: usize>;
 
-    // Compile test for https://github.com/bevyengine/bevy/pull/7001.
     #[derive(SystemParam)]
     pub struct ConstGenericParam<'w, const I: usize>(Res<'w, R<I>>);
 
-    // Compile test for https://github.com/bevyengine/bevy/pull/6867.
     #[derive(SystemParam)]
     pub struct LongParam<'w> {
         _r0: Res<'w, R<0>>,
@@ -1608,16 +1530,12 @@ mod tests {
         crate::system::assert_is_system(long_system);
     }
 
-    // Compile test for https://github.com/bevyengine/bevy/pull/6919.
-    // Regression test for https://github.com/bevyengine/bevy/issues/7447.
     #[derive(SystemParam)]
-    struct IgnoredParam<'w, T: Resource, Marker: 'static> {
+    struct MyParam<'w, T: Resource, Marker: 'static> {
         _foo: Res<'w, T>,
         #[system_param(ignore)]
-        marker: PhantomData<&'w Marker>,
+        marker: PhantomData<Marker>,
     }
-
-    // Compile tests for https://github.com/bevyengine/bevy/pull/6957.
 
     #[derive(SystemParam)]
     pub struct UnitParam;
@@ -1631,7 +1549,6 @@ mod tests {
     #[derive(Resource)]
     struct PrivateResource;
 
-    // Regression test for https://github.com/bevyengine/bevy/issues/4200.
     #[derive(SystemParam)]
     pub struct EncapsulatedParam<'w>(Res<'w, PrivateResource>);
 

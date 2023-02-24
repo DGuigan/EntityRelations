@@ -2,7 +2,6 @@ use crate::derive_data::{EnumVariant, EnumVariantFields, ReflectEnum, StructFiel
 use crate::enum_utility::{get_variant_constructors, EnumVariantConstructors};
 use crate::fq_std::{FQAny, FQBox, FQOption, FQResult};
 use crate::impls::impl_typed;
-use crate::utility::extend_where_clause;
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, Span};
 use quote::quote;
@@ -15,8 +14,6 @@ pub(crate) fn impl_enum(reflect_enum: &ReflectEnum) -> TokenStream {
     let ref_name = Ident::new("__name_param", Span::call_site());
     let ref_index = Ident::new("__index_param", Span::call_site());
     let ref_value = Ident::new("__value_param", Span::call_site());
-
-    let where_clause_options = reflect_enum.where_clause_options();
 
     let EnumImpls {
         variant_info,
@@ -79,7 +76,6 @@ pub(crate) fn impl_enum(reflect_enum: &ReflectEnum) -> TokenStream {
     let typed_impl = impl_typed(
         enum_name,
         reflect_enum.meta().generics(),
-        &where_clause_options,
         quote! {
             let variants = [#(#variant_info),*];
             let info = #info_generator;
@@ -88,20 +84,16 @@ pub(crate) fn impl_enum(reflect_enum: &ReflectEnum) -> TokenStream {
         bevy_reflect_path,
     );
 
-    let get_type_registration_impl = reflect_enum
-        .meta()
-        .get_type_registration(&where_clause_options);
+    let get_type_registration_impl = reflect_enum.meta().get_type_registration();
     let (impl_generics, ty_generics, where_clause) =
         reflect_enum.meta().generics().split_for_impl();
-
-    let where_reflect_clause = extend_where_clause(where_clause, &where_clause_options);
 
     TokenStream::from(quote! {
         #get_type_registration_impl
 
         #typed_impl
 
-        impl #impl_generics #bevy_reflect_path::Enum for #enum_name #ty_generics #where_reflect_clause {
+        impl #impl_generics #bevy_reflect_path::Enum for #enum_name #ty_generics #where_clause {
             fn field(&self, #ref_name: &str) -> #FQOption<&dyn #bevy_reflect_path::Reflect> {
                  match self {
                     #(#enum_field,)*
@@ -185,7 +177,7 @@ pub(crate) fn impl_enum(reflect_enum: &ReflectEnum) -> TokenStream {
             }
         }
 
-        impl #impl_generics #bevy_reflect_path::Reflect for #enum_name #ty_generics #where_reflect_clause {
+        impl #impl_generics #bevy_reflect_path::Reflect for #enum_name #ty_generics #where_clause {
             #[inline]
             fn type_name(&self) -> &str {
                 ::core::any::type_name::<Self>()
@@ -387,9 +379,9 @@ fn generate_impls(reflect_enum: &ReflectEnum, ref_index: &Ident, ref_name: &Iden
             }
             EnumVariantFields::Unnamed(fields) => {
                 let args = get_field_args(fields, |reflect_idx, declaration_index, field| {
-                    let declare_field = syn::Index::from(declaration_index);
+                    let declar_field = syn::Index::from(declaration_index);
                     enum_field_at.push(quote! {
-                        #unit { #declare_field : value, .. } if #ref_index == #reflect_idx => #FQOption::Some(value)
+                        #unit { #declar_field : value, .. } if #ref_index == #reflect_idx => #FQOption::Some(value)
                     });
 
                     #[cfg(feature = "documentation")]

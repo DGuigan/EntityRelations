@@ -1,18 +1,22 @@
-use bevy_ecs::{component::Component, schedule::Schedule, world::World};
+use bevy_ecs::{
+    component::Component,
+    schedule::{Stage, SystemStage},
+    world::World,
+};
 use criterion::{BenchmarkId, Criterion};
 
 #[derive(Component)]
 struct A<const N: u16>(f32);
 
-fn setup(system_count: usize) -> (World, Schedule) {
+fn setup(system_count: usize) -> (World, SystemStage) {
     let mut world = World::new();
     fn empty() {}
-    let mut schedule = Schedule::new();
+    let mut stage = SystemStage::parallel();
     for _ in 0..system_count {
-        schedule.add_system(empty);
+        stage.add_system(empty);
     }
-    schedule.run(&mut world);
-    (world, schedule)
+    stage.run(&mut world);
+    (world, stage)
 }
 
 /// create `count` entities with distinct archetypes
@@ -74,13 +78,13 @@ pub fn no_archetypes(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("no_archetypes");
     for i in 0..=5 {
         let system_count = i * 20;
-        let (mut world, mut schedule) = setup(system_count);
+        let (mut world, mut stage) = setup(system_count);
         group.bench_with_input(
             BenchmarkId::new("system_count", system_count),
             &system_count,
             |bencher, &_system_count| {
                 bencher.iter(|| {
-                    schedule.run(&mut world);
+                    stage.run(&mut world);
                 });
             },
         );
@@ -97,12 +101,12 @@ pub fn added_archetypes(criterion: &mut Criterion) {
             |bencher, &archetype_count| {
                 bencher.iter_batched(
                     || {
-                        let (mut world, schedule) = setup(SYSTEM_COUNT);
+                        let (mut world, stage) = setup(SYSTEM_COUNT);
                         add_archetypes(&mut world, archetype_count);
-                        (world, schedule)
+                        (world, stage)
                     },
-                    |(mut world, mut schedule)| {
-                        schedule.run(&mut world);
+                    |(mut world, mut stage)| {
+                        stage.run(&mut world);
                     },
                     criterion::BatchSize::LargeInput,
                 );

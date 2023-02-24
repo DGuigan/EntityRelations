@@ -1,4 +1,4 @@
-use bevy_ecs::{prelude::*, schedule::IntoSystemConfig};
+use bevy_ecs::prelude::*;
 use rand::Rng;
 use std::ops::Deref;
 
@@ -16,16 +16,23 @@ fn main() {
     // Add the counter resource to remember how many entities where spawned
     world.insert_resource(EntityCounter { value: 0 });
 
-    // Create a new Schedule, which stores systems and controls their relative ordering
+    // Create a new Schedule, which defines an execution strategy for Systems
     let mut schedule = Schedule::default();
+    // Create a Stage to add to our Schedule. Each Stage in a schedule runs all of its systems
+    // before moving on to the next Stage
+    let mut update = SystemStage::parallel();
 
-    // Add systems to the Schedule to execute our app logic
+    // Add systems to the Stage to execute our app logic
     // We can label our systems to force a specific run-order between some of them
-    schedule.add_system(spawn_entities.in_set(SimulationSystem::Spawn));
-    schedule.add_system(print_counter_when_changed.after(SimulationSystem::Spawn));
-    schedule.add_system(age_all_entities.in_set(SimulationSystem::Age));
-    schedule.add_system(remove_old_entities.after(SimulationSystem::Age));
-    schedule.add_system(print_changed_entities.after(SimulationSystem::Age));
+    update.add_system(spawn_entities.label(SimulationSystem::Spawn));
+    update.add_system(print_counter_when_changed.after(SimulationSystem::Spawn));
+    update.add_system(age_all_entities.label(SimulationSystem::Age));
+    update.add_system(remove_old_entities.after(SimulationSystem::Age));
+    update.add_system(print_changed_entities.after(SimulationSystem::Age));
+    // Add the Stage with our systems to the Schedule
+    #[derive(StageLabel)]
+    struct Update;
+    schedule.add_stage(Update, update);
 
     // Simulate 10 frames in our world
     for iteration in 1..=10 {
@@ -46,8 +53,8 @@ struct Age {
     frames: i32,
 }
 
-// System sets can be used to group systems and configured to control relative ordering
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+// System labels to enforce a run order of our systems
+#[derive(SystemLabel, Debug, Clone, PartialEq, Eq, Hash)]
 enum SimulationSystem {
     Spawn,
     Age,

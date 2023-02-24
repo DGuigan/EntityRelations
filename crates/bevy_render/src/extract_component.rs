@@ -2,7 +2,7 @@ use crate::{
     render_resource::{encase::internal::WriteInto, DynamicUniformBuffer, ShaderType},
     renderer::{RenderDevice, RenderQueue},
     view::ComputedVisibility,
-    Extract, ExtractSchedule, RenderApp, RenderSet,
+    Extract, RenderApp, RenderStage,
 };
 use bevy_app::{App, Plugin};
 use bevy_asset::{Asset, Handle};
@@ -13,8 +13,6 @@ use bevy_ecs::{
     system::lifetimeless::Read,
 };
 use std::{marker::PhantomData, ops::Deref};
-
-pub use bevy_render_macros::ExtractComponent;
 
 /// Stores the index of a uniform inside of [`ComponentUniforms`].
 #[derive(Component)]
@@ -33,7 +31,7 @@ impl<C: Component> DynamicUniformIndex<C> {
 /// Describes how a component gets extracted for rendering.
 ///
 /// Therefore the component is transferred from the "app world" into the "render world"
-/// in the [`ExtractSchedule`](crate::ExtractSchedule) step.
+/// in the [`RenderStage::Extract`](crate::RenderStage::Extract) step.
 pub trait ExtractComponent: Component {
     /// ECS [`WorldQuery`] to fetch the components to extract.
     type Query: WorldQuery + ReadOnlyWorldQuery;
@@ -68,7 +66,7 @@ pub trait ExtractComponent: Component {
 /// For referencing the newly created uniforms a [`DynamicUniformIndex`] is inserted
 /// for every processed entity.
 ///
-/// Therefore it sets up the [`RenderSet::Prepare`](crate::RenderSet::Prepare) step
+/// Therefore it sets up the [`RenderStage::Prepare`](crate::RenderStage::Prepare) step
 /// for the specified [`ExtractComponent`].
 pub struct UniformComponentPlugin<C>(PhantomData<fn() -> C>);
 
@@ -83,7 +81,7 @@ impl<C: Component + ShaderType + WriteInto + Clone> Plugin for UniformComponentP
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .insert_resource(ComponentUniforms::<C>::default())
-                .add_system(prepare_uniform_components::<C>.in_set(RenderSet::Prepare));
+                .add_system_to_stage(RenderStage::Prepare, prepare_uniform_components::<C>);
         }
     }
 }
@@ -151,7 +149,7 @@ fn prepare_uniform_components<C: Component>(
 
 /// This plugin extracts the components into the "render world".
 ///
-/// Therefore it sets up the [`ExtractSchedule`](crate::ExtractSchedule) step
+/// Therefore it sets up the [`RenderStage::Extract`](crate::RenderStage::Extract) step
 /// for the specified [`ExtractComponent`].
 pub struct ExtractComponentPlugin<C, F = ()> {
     only_extract_visible: bool,
@@ -180,9 +178,10 @@ impl<C: ExtractComponent> Plugin for ExtractComponentPlugin<C> {
     fn build(&self, app: &mut App) {
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
             if self.only_extract_visible {
-                render_app.add_system_to_schedule(ExtractSchedule, extract_visible_components::<C>);
+                render_app
+                    .add_system_to_stage(RenderStage::Extract, extract_visible_components::<C>);
             } else {
-                render_app.add_system_to_schedule(ExtractSchedule, extract_components::<C>);
+                render_app.add_system_to_stage(RenderStage::Extract, extract_components::<C>);
             }
         }
     }

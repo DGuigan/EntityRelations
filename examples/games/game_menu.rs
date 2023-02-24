@@ -7,9 +7,8 @@ use bevy::prelude::*;
 const TEXT_COLOR: Color = Color::rgb(0.9, 0.9, 0.9);
 
 // Enum that will be used as a global state for the game
-#[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash, States)]
+#[derive(Clone, Eq, PartialEq, Debug, Hash)]
 enum GameState {
-    #[default]
     Splash,
     Menu,
     Game,
@@ -34,8 +33,8 @@ fn main() {
         .insert_resource(DisplayQuality::Medium)
         .insert_resource(Volume(7))
         .add_startup_system(setup)
-        // Declare the game state, whose starting value is determined by the `Default` trait
-        .add_state::<GameState>()
+        // Declare the game state, and set its startup value
+        .add_state(GameState::Splash)
         // Adds the plugins for each state
         .add_plugin(splash::SplashPlugin)
         .add_plugin(menu::MenuPlugin)
@@ -60,13 +59,13 @@ mod splash {
             // As this plugin is managing the splash screen, it will focus on the state `GameState::Splash`
             app
                 // When entering the state, spawn everything needed for this screen
-                .add_system_to_schedule(OnEnter(GameState::Splash), splash_setup)
+                .add_system_set(SystemSet::on_enter(GameState::Splash).with_system(splash_setup))
                 // While in this state, run the `countdown` system
-                .add_system(countdown.in_set(OnUpdate(GameState::Splash)))
+                .add_system_set(SystemSet::on_update(GameState::Splash).with_system(countdown))
                 // When exiting the state, despawn everything that was spawned for this screen
-                .add_system_to_schedule(
-                    OnExit(GameState::Splash),
-                    despawn_screen::<OnSplashScreen>,
+                .add_system_set(
+                    SystemSet::on_exit(GameState::Splash)
+                        .with_system(despawn_screen::<OnSplashScreen>),
                 );
         }
     }
@@ -112,12 +111,12 @@ mod splash {
 
     // Tick the timer, and change state when finished
     fn countdown(
-        mut game_state: ResMut<NextState<GameState>>,
+        mut game_state: ResMut<State<GameState>>,
         time: Res<Time>,
         mut timer: ResMut<SplashTimer>,
     ) {
         if timer.tick(time.delta()).finished() {
-            game_state.set(GameState::Menu);
+            game_state.set(GameState::Menu).unwrap();
         }
     }
 }
@@ -133,9 +132,11 @@ mod game {
 
     impl Plugin for GamePlugin {
         fn build(&self, app: &mut App) {
-            app.add_system_to_schedule(OnEnter(GameState::Game), game_setup)
-                .add_system(game.in_set(OnUpdate(GameState::Game)))
-                .add_system_to_schedule(OnExit(GameState::Game), despawn_screen::<OnGameScreen>);
+            app.add_system_set(SystemSet::on_enter(GameState::Game).with_system(game_setup))
+                .add_system_set(SystemSet::on_update(GameState::Game).with_system(game))
+                .add_system_set(
+                    SystemSet::on_exit(GameState::Game).with_system(despawn_screen::<OnGameScreen>),
+                );
         }
     }
 
@@ -241,11 +242,11 @@ mod game {
     // Tick the timer, and change state when finished
     fn game(
         time: Res<Time>,
-        mut game_state: ResMut<NextState<GameState>>,
+        mut game_state: ResMut<State<GameState>>,
         mut timer: ResMut<GameTimer>,
     ) {
         if timer.tick(time.delta()).finished() {
-            game_state.set(GameState::Menu);
+            game_state.set(GameState::Menu).unwrap();
         }
     }
 }
@@ -267,52 +268,64 @@ mod menu {
                 // At start, the menu is not enabled. This will be changed in `menu_setup` when
                 // entering the `GameState::Menu` state.
                 // Current screen in the menu is handled by an independent state from `GameState`
-                .add_state::<MenuState>()
-                .add_system_to_schedule(OnEnter(GameState::Menu), menu_setup)
+                .add_state(MenuState::Disabled)
+                .add_system_set(SystemSet::on_enter(GameState::Menu).with_system(menu_setup))
                 // Systems to handle the main menu screen
-                .add_system_to_schedule(OnEnter(MenuState::Main), main_menu_setup)
-                .add_system_to_schedule(OnExit(MenuState::Main), despawn_screen::<OnMainMenuScreen>)
+                .add_system_set(SystemSet::on_enter(MenuState::Main).with_system(main_menu_setup))
+                .add_system_set(
+                    SystemSet::on_exit(MenuState::Main)
+                        .with_system(despawn_screen::<OnMainMenuScreen>),
+                )
                 // Systems to handle the settings menu screen
-                .add_system_to_schedule(OnEnter(MenuState::Settings), settings_menu_setup)
-                .add_system_to_schedule(
-                    OnExit(MenuState::Settings),
-                    despawn_screen::<OnSettingsMenuScreen>,
+                .add_system_set(
+                    SystemSet::on_enter(MenuState::Settings).with_system(settings_menu_setup),
+                )
+                .add_system_set(
+                    SystemSet::on_exit(MenuState::Settings)
+                        .with_system(despawn_screen::<OnSettingsMenuScreen>),
                 )
                 // Systems to handle the display settings screen
-                .add_system_to_schedule(
-                    OnEnter(MenuState::SettingsDisplay),
-                    display_settings_menu_setup,
+                .add_system_set(
+                    SystemSet::on_enter(MenuState::SettingsDisplay)
+                        .with_system(display_settings_menu_setup),
                 )
-                .add_system(
-                    setting_button::<DisplayQuality>.in_set(OnUpdate(MenuState::SettingsDisplay)),
+                .add_system_set(
+                    SystemSet::on_update(MenuState::SettingsDisplay)
+                        .with_system(setting_button::<DisplayQuality>),
                 )
-                .add_system_to_schedule(
-                    OnExit(MenuState::SettingsDisplay),
-                    despawn_screen::<OnDisplaySettingsMenuScreen>,
+                .add_system_set(
+                    SystemSet::on_exit(MenuState::SettingsDisplay)
+                        .with_system(despawn_screen::<OnDisplaySettingsMenuScreen>),
                 )
                 // Systems to handle the sound settings screen
-                .add_system_to_schedule(
-                    OnEnter(MenuState::SettingsSound),
-                    sound_settings_menu_setup,
+                .add_system_set(
+                    SystemSet::on_enter(MenuState::SettingsSound)
+                        .with_system(sound_settings_menu_setup),
                 )
-                .add_system(setting_button::<Volume>.in_set(OnUpdate(MenuState::SettingsSound)))
-                .add_system_to_schedule(
-                    OnExit(MenuState::SettingsSound),
-                    despawn_screen::<OnSoundSettingsMenuScreen>,
+                .add_system_set(
+                    SystemSet::on_update(MenuState::SettingsSound)
+                        .with_system(setting_button::<Volume>),
+                )
+                .add_system_set(
+                    SystemSet::on_exit(MenuState::SettingsSound)
+                        .with_system(despawn_screen::<OnSoundSettingsMenuScreen>),
                 )
                 // Common systems to all screens that handles buttons behaviour
-                .add_systems((menu_action, button_system).in_set(OnUpdate(GameState::Menu)));
+                .add_system_set(
+                    SystemSet::on_update(GameState::Menu)
+                        .with_system(menu_action)
+                        .with_system(button_system),
+                );
         }
     }
 
     // State used for the current menu screen
-    #[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash, States)]
+    #[derive(Clone, Eq, PartialEq, Debug, Hash)]
     enum MenuState {
         Main,
         Settings,
         SettingsDisplay,
         SettingsSound,
-        #[default]
         Disabled,
     }
 
@@ -337,7 +350,7 @@ mod menu {
     const HOVERED_PRESSED_BUTTON: Color = Color::rgb(0.25, 0.65, 0.25);
     const PRESSED_BUTTON: Color = Color::rgb(0.35, 0.75, 0.35);
 
-    // Tag component used to mark which setting is currently selected
+    // Tag component used to mark wich setting is currently selected
     #[derive(Component)]
     struct SelectedOption;
 
@@ -389,8 +402,8 @@ mod menu {
         }
     }
 
-    fn menu_setup(mut menu_state: ResMut<NextState<MenuState>>) {
-        menu_state.set(MenuState::Main);
+    fn menu_setup(mut menu_state: ResMut<State<MenuState>>) {
+        let _ = menu_state.set(MenuState::Main);
     }
 
     fn main_menu_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -792,27 +805,27 @@ mod menu {
             (Changed<Interaction>, With<Button>),
         >,
         mut app_exit_events: EventWriter<AppExit>,
-        mut menu_state: ResMut<NextState<MenuState>>,
-        mut game_state: ResMut<NextState<GameState>>,
+        mut menu_state: ResMut<State<MenuState>>,
+        mut game_state: ResMut<State<GameState>>,
     ) {
         for (interaction, menu_button_action) in &interaction_query {
             if *interaction == Interaction::Clicked {
                 match menu_button_action {
                     MenuButtonAction::Quit => app_exit_events.send(AppExit),
                     MenuButtonAction::Play => {
-                        game_state.set(GameState::Game);
-                        menu_state.set(MenuState::Disabled);
+                        game_state.set(GameState::Game).unwrap();
+                        menu_state.set(MenuState::Disabled).unwrap();
                     }
-                    MenuButtonAction::Settings => menu_state.set(MenuState::Settings),
+                    MenuButtonAction::Settings => menu_state.set(MenuState::Settings).unwrap(),
                     MenuButtonAction::SettingsDisplay => {
-                        menu_state.set(MenuState::SettingsDisplay);
+                        menu_state.set(MenuState::SettingsDisplay).unwrap();
                     }
                     MenuButtonAction::SettingsSound => {
-                        menu_state.set(MenuState::SettingsSound);
+                        menu_state.set(MenuState::SettingsSound).unwrap();
                     }
-                    MenuButtonAction::BackToMainMenu => menu_state.set(MenuState::Main),
+                    MenuButtonAction::BackToMainMenu => menu_state.set(MenuState::Main).unwrap(),
                     MenuButtonAction::BackToSettings => {
-                        menu_state.set(MenuState::Settings);
+                        menu_state.set(MenuState::Settings).unwrap();
                     }
                 }
             }

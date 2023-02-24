@@ -2,8 +2,10 @@ use crate::{core_2d, core_3d, fullscreen_vertex_shader::fullscreen_shader_vertex
 use bevy_app::{App, Plugin};
 use bevy_asset::{load_internal_asset, HandleUntyped};
 use bevy_ecs::{
-    prelude::*,
-    query::{QueryItem, QueryState},
+    prelude::{Component, Entity},
+    query::{QueryItem, QueryState, With},
+    system::{Commands, Query, Res, ResMut, Resource},
+    world::{FromWorld, World},
 };
 use bevy_math::{UVec2, UVec4, Vec4};
 use bevy_reflect::{Reflect, TypeUuid};
@@ -19,7 +21,7 @@ use bevy_render::{
     renderer::{RenderContext, RenderDevice},
     texture::{CachedTexture, TextureCache},
     view::ViewTarget,
-    RenderApp, RenderSet,
+    RenderApp, RenderStage,
 };
 #[cfg(feature = "trace")]
 use bevy_utils::tracing::info_span;
@@ -46,8 +48,8 @@ impl Plugin for BloomPlugin {
 
         render_app
             .init_resource::<BloomPipelines>()
-            .add_system(prepare_bloom_textures.in_set(RenderSet::Prepare))
-            .add_system(queue_bloom_bind_groups.in_set(RenderSet::Queue));
+            .add_system_to_stage(RenderStage::Prepare, prepare_bloom_textures)
+            .add_system_to_stage(RenderStage::Queue, queue_bloom_bind_groups);
 
         {
             let bloom_node = BloomNode::new(&mut render_app.world);
@@ -578,7 +580,6 @@ fn prepare_bloom_textures(
                 dimension: TextureDimension::D2,
                 format: ViewTarget::TEXTURE_FORMAT_HDR,
                 usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
             };
 
             texture_descriptor.label = Some("bloom_texture_a");
