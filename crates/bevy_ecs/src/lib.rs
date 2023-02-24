@@ -11,6 +11,8 @@ pub mod component;
 pub mod entity;
 pub mod event;
 pub mod query;
+pub mod relation;
+
 #[cfg(feature = "bevy_reflect")]
 pub mod reflect;
 pub mod schedule;

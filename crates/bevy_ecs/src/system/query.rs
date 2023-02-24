@@ -273,11 +273,11 @@ use std::{any::TypeId, borrow::Borrow, fmt::Debug};
 /// [`Table`]: crate::storage::Table
 /// [`With`]: crate::query::With
 /// [`Without`]: crate::query::Without
-pub struct Query<'world, 'state, Q: WorldQuery, F: ReadOnlyWorldQuery = ()> {
-    world: &'world World,
-    state: &'state QueryState<Q, F>,
-    last_change_tick: u32,
-    change_tick: u32,
+pub struct Query<'world, 'state, Q: 'static + WorldQuery, F: 'static + ReadOnlyWorldQuery = ()> {
+    pub(crate) world: &'world World,
+    pub(crate) state: &'state QueryState<Q, F>,
+    pub(crate) last_change_tick: u32,
+    pub(crate) change_tick: u32,
     // SAFETY: This is used to ensure that `get_component_mut::<C>` properly fails when a Query writes C
     // and gets converted to a read-only query using `to_readonly`. Without checking this, `get_component_mut` relies on
     // QueryState's archetype_component_access, which will continue allowing write access to C after being cast to
