@@ -1,46 +1,31 @@
+use bevy_utils::{HashMap, HashSet};
+use smallvec::SmallVec;
 use std::marker::PhantomData;
 
 use crate as bevy_ecs;
 
 use crate::{
-    component::ComponentStorage,
+    component::{Component, ComponentId, ComponentStorage},
     entity::Entity,
     query::{ReadOnlyWorldQuery, WorldQuery},
     system::Query,
     world::World,
 };
 
-mod bookkeeping;
-mod joins;
-mod lenses;
-mod traversals;
+//mod joins;
+//mod lenses;
+//mod traversals;
 
-pub use bookkeeping::*;
-pub use joins::*;
-pub use traversals::*;
-
-pub enum DespawnPolicy {
-    Orphan,
-    Reparent,
-    RecursiveDespawn,
-    RecursiveDisconnect,
-}
-
-impl DespawnPolicy {
-    pub(crate) fn apply(&self, _world: &mut World, _start: Entity) {
-        todo!("Despawn Policies not implemented yet")
-    }
-}
-
-pub trait Relation: Sized + Send + Sync {
-    type Arity: RelationArity<Self>;
-    type Storage: ComponentStorage;
-    const DESPAWN_POLICY: DespawnPolicy = DespawnPolicy::Orphan;
-}
+//pub use joins::*;
+//pub use traversals::*;
 
 mod sealed {
     use super::*;
     pub trait Sealed {}
+    impl Sealed for RecursiveDespawn {}
+    impl Sealed for RecursiveDelink {}
+    impl Sealed for Reparent {}
+    impl Sealed for Orphan {}
     impl<'a, T: Relation> Sealed for &'a T {}
     impl<'a, T: Relation> Sealed for &'a mut T {}
     impl<T: RelationSet> Sealed for Option<T> {}
@@ -49,10 +34,40 @@ mod sealed {
     impl<P0, P1> Sealed for (P0, P1) {}
 }
 
+pub struct Foster<T: Relation>(PhantomData<T>);
+
+pub struct Storage<R: Relation>(pub(crate) SmallVec<[R; 1]>);
+
+impl<R: Relation> Component for Storage<R> {
+    type Storage = R::Storage;
+}
+
+pub(crate) struct Index {
+    pub(crate) targets: [HashMap<ComponentId, HashMap<Entity, usize>>; 4],
+    pub(crate) fosters: HashMap<ComponentId, Entity>,
+}
+
 use sealed::*;
 
+// Precedence: Most data latering operation is preferred.
+// Smaller number -> Higher precedence
+struct RecursiveDespawn;
+struct RecursiveDelink;
+struct Reparent;
+struct Orphan;
+
+pub trait RelationPolicy: Sealed {}
+
+pub trait Relation: 'static + Sized + Send + Sync {
+    type Policy: RelationPolicy;
+    type Storage: ComponentStorage;
+}
+
 #[derive(Default, Clone, Copy)]
-pub struct Identity;
+pub struct Drop;
+
+#[derive(Default, Clone, Copy)]
+pub struct Get;
 
 pub trait RelationSet: Sealed {
     type Types;
@@ -62,20 +77,20 @@ pub trait RelationSet: Sealed {
 
 impl<'a, T: Relation> RelationSet for &'a T {
     type Types = T;
-    type WorldQuery = &'a <T as Relation>::Arity;
-    type EmptyJoinSet = Identity;
+    type WorldQuery = &'a Storage<T>;
+    type EmptyJoinSet = Drop;
 }
 
 impl<'a, T: Relation> RelationSet for &'a mut T {
     type Types = T;
-    type WorldQuery = &'a mut <T as Relation>::Arity;
-    type EmptyJoinSet = Identity;
+    type WorldQuery = &'a mut Storage<T>;
+    type EmptyJoinSet = Drop;
 }
 
 impl<T: RelationSet> RelationSet for Option<T> {
     type Types = T::Types;
     type WorldQuery = Option<T::WorldQuery>;
-    type EmptyJoinSet = T::EmptyJoinSet;
+    type EmptyJoinSet = Drop;
 }
 
 // TODO: All tuple
