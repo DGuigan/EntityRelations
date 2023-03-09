@@ -44,7 +44,7 @@ impl<R: Relation> Component for Storage<R> {
 
 pub(crate) struct Index {
     pub(crate) targets: [HashMap<ComponentId, HashMap<Entity, usize>>; 4],
-    pub(crate) fosters: HashMap<ComponentId, Entity>,
+    pub(crate) fosters: HashMap<ComponentId, HashSet<Entity>>,
 }
 
 use sealed::*;
