@@ -22,10 +22,6 @@ use crate::{
 mod sealed {
     use super::*;
     pub trait Sealed {}
-    impl Sealed for RecursiveDespawn {}
-    impl Sealed for RecursiveDelink {}
-    impl Sealed for Reparent {}
-    impl Sealed for Orphan {}
     impl<'a, T: Relation> Sealed for &'a T {}
     impl<'a, T: Relation> Sealed for &'a mut T {}
     impl<T: RelationSet> Sealed for Option<T> {}
@@ -42,24 +38,25 @@ impl<R: Relation> Component for Storage<R> {
     type Storage = R::Storage;
 }
 
+#[derive(Component)]
 pub(crate) struct Index {
     pub(crate) targets: [HashMap<ComponentId, HashMap<Entity, usize>>; 4],
-    pub(crate) fosters: HashMap<ComponentId, HashSet<Entity>>,
+    pub(crate) fosters: HashMap<ComponentId, Entity>,
 }
 
 use sealed::*;
 
 // Precedence: Most data latering operation is preferred.
 // Smaller number -> Higher precedence
-struct RecursiveDespawn;
-struct RecursiveDelink;
-struct Reparent;
-struct Orphan;
-
-pub trait RelationPolicy: Sealed {}
+pub enum DespawnPolicy {
+    RecursiveDespawn = 0,
+    RecursiveDelink = 1,
+    Reparent = 2,
+    Orphan = 3,
+}
 
 pub trait Relation: 'static + Sized + Send + Sync {
-    type Policy: RelationPolicy;
+    const DESPAWN_POLICY: DespawnPolicy = DespawnPolicy::Orphan;
     type Storage: ComponentStorage;
 }
 
@@ -75,15 +72,15 @@ pub trait RelationSet: Sealed {
     type EmptyJoinSet: Default;
 }
 
-impl<'a, T: Relation> RelationSet for &'a T {
+impl<T: Relation> RelationSet for &'_ T {
     type Types = T;
-    type WorldQuery = &'a Storage<T>;
+    type WorldQuery = &'static Storage<T>;
     type EmptyJoinSet = Drop;
 }
 
-impl<'a, T: Relation> RelationSet for &'a mut T {
+impl<T: Relation> RelationSet for &'_ mut T {
     type Types = T;
-    type WorldQuery = &'a mut Storage<T>;
+    type WorldQuery = &'static mut Storage<T>;
     type EmptyJoinSet = Drop;
 }
 
@@ -117,7 +114,8 @@ type FetchItemMut<'a, R> = <<R as RelationSet>::WorldQuery as WorldQuery>::Item<
 #[derive(WorldQuery)]
 #[world_query(mutable)]
 pub struct Relations<T: RelationSet + Send + Sync> {
-    world_query: T::WorldQuery,
+    storages: T::WorldQuery,
+    index: &'static Index,
     #[world_query(ignore)]
     _phantom: PhantomData<T>,
 }
