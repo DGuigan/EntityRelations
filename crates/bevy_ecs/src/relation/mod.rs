@@ -12,10 +12,11 @@ use crate::{
     world::World,
 };
 
+mod type_magic;
 //mod joins;
-//mod lenses;
 //mod traversals;
 
+pub use type_magic::*;
 //pub use joins::*;
 //pub use traversals::*;
 
