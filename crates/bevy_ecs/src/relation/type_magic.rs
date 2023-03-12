@@ -63,3 +63,5 @@ impl<K0, K1, P0, P1> Lenses<(K0, K1), K1, 1> for (P0, P1) {
 // (T, U) + (A, B) -> ((T, A), (U, B))
 // (T, U) + (A, NoStitch) -> ((T, A), U)
 pub trait Stitch {}
+
+pub trait FlatIterProduct {}

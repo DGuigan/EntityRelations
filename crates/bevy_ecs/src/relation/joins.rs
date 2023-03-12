@@ -565,6 +565,10 @@ mod compile_tests {
             .join::<C>(&mut d)
             .for_each(|(_, (cd, be))| cd.for_each(|_| {}));
     }
+
+    fn generic<R: Relation>(rq: Query<(&A, Relations<&R>)>, b: Query<&B>) {
+        rq.ops().join::<R>(&b).for_each(|_| {})
+    }
 }
 
 #[cfg(test)]

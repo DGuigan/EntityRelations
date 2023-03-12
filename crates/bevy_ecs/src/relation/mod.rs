@@ -1,4 +1,5 @@
 use bevy_utils::{HashMap, HashSet};
+use core::any::TypeId;
 use smallvec::SmallVec;
 use std::marker::PhantomData;
 
@@ -31,21 +32,37 @@ mod sealed {
     impl<P0, P1> Sealed for (P0, P1) {}
 }
 
-pub struct Foster<T: Relation>(PhantomData<T>);
+use sealed::*;
 
-pub struct Storage<R: Relation>(pub(crate) SmallVec<[R; 1]>);
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+pub(crate) struct RelationIds<R: Relation> {
+    _phantom: PhantomData<R>,
+}
+
+#[derive(Component)]
+pub(crate) struct StorageId(pub(crate) ComponentId);
+
+#[derive(Component)]
+pub(crate) struct FosterId(pub(crate) ComponentId);
+
+pub struct Storage<R: Relation> {
+    pub(crate) values: SmallVec<[R; 1]>,
+    pub(crate) relation_id_entity: Entity,
+}
 
 impl<R: Relation> Component for Storage<R> {
     type Storage = R::Storage;
 }
 
 #[derive(Component)]
-pub(crate) struct Index {
-    pub(crate) targets: [HashMap<ComponentId, HashMap<Entity, usize>>; 4],
-    pub(crate) fosters: HashMap<ComponentId, Entity>,
-}
+pub struct Foster<T: Relation>(PhantomData<T>);
 
-use sealed::*;
+#[derive(Component)]
+pub struct Index {
+    pub(crate) targets: [HashMap<Entity, HashMap<Entity, usize>>; 4],
+    pub(crate) fosters: HashMap<Entity, Entity>,
+}
 
 // Precedence: Most data latering operation is preferred.
 // Smaller number -> Higher precedence
@@ -59,6 +76,7 @@ pub enum DespawnPolicy {
 pub trait Relation: 'static + Sized + Send + Sync {
     const DESPAWN_POLICY: DespawnPolicy = DespawnPolicy::Orphan;
     type Storage: ComponentStorage;
+    const EXCLUSIVE: bool = false;
 }
 
 #[derive(Default, Clone, Copy)]
@@ -73,21 +91,21 @@ pub trait RelationSet: Sealed {
     type EmptyJoinSet: Default;
 }
 
-impl<T: Relation> RelationSet for &'_ T {
-    type Types = T;
-    type WorldQuery = &'static Storage<T>;
+impl<'a, R: Relation> RelationSet for &'a R {
+    type Types = R;
+    type WorldQuery = (&'a Index, &'a Storage<R>);
     type EmptyJoinSet = Drop;
 }
 
-impl<T: Relation> RelationSet for &'_ mut T {
-    type Types = T;
-    type WorldQuery = &'static mut Storage<T>;
+impl<'a, R: Relation> RelationSet for &'a mut R {
+    type Types = R;
+    type WorldQuery = (&'a Index, &'a mut Storage<R>);
     type EmptyJoinSet = Drop;
 }
 
 impl<T: RelationSet> RelationSet for Option<T> {
     type Types = T::Types;
-    type WorldQuery = Option<T::WorldQuery>;
+    type WorldQuery = Option<(&'static Index, T::WorldQuery)>;
     type EmptyJoinSet = Drop;
 }
 
@@ -116,7 +134,6 @@ type FetchItemMut<'a, R> = <<R as RelationSet>::WorldQuery as WorldQuery>::Item<
 #[world_query(mutable)]
 pub struct Relations<T: RelationSet + Send + Sync> {
     storages: T::WorldQuery,
-    index: &'static Index,
     #[world_query(ignore)]
     _phantom: PhantomData<T>,
 }
