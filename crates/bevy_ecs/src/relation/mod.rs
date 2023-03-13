@@ -34,21 +34,8 @@ mod sealed {
 
 use sealed::*;
 
-#[derive(Component)]
-#[component(storage = "SparseSet")]
-pub(crate) struct RelationIds<R: Relation> {
-    _phantom: PhantomData<R>,
-}
-
-#[derive(Component)]
-pub(crate) struct StorageId(pub(crate) ComponentId);
-
-#[derive(Component)]
-pub(crate) struct FosterId(pub(crate) ComponentId);
-
 pub struct Storage<R: Relation> {
     pub(crate) values: SmallVec<[R; 1]>,
-    pub(crate) relation_id_entity: Entity,
 }
 
 impl<R: Relation> Component for Storage<R> {
@@ -56,12 +43,9 @@ impl<R: Relation> Component for Storage<R> {
 }
 
 #[derive(Component)]
-pub struct Foster<T: Relation>(PhantomData<T>);
-
-#[derive(Component)]
 pub struct Index {
-    pub(crate) targets: [HashMap<Entity, HashMap<Entity, usize>>; 4],
-    pub(crate) fosters: HashMap<Entity, Entity>,
+    pub(crate) targets: [HashMap<TypeId, HashMap<Entity, usize>>; 4],
+    pub(crate) fosters: HashMap<TypeId, Entity>,
 }
 
 // Precedence: Most data latering operation is preferred.
@@ -130,6 +114,9 @@ type FetchItem<'a, R> =
     <<<R as RelationSet>::WorldQuery as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
 type FetchItemMut<'a, R> = <<R as RelationSet>::WorldQuery as WorldQuery>::Item<'a>;
 
+// TODO:
+// - Manual `WorldQuery` impl to get `ComponentId` from `World` to remove the usage of `TypeId`
+// - `TypeId` is not guarenteed to be stable which is a problem for serialization.
 #[derive(WorldQuery)]
 #[world_query(mutable)]
 pub struct Relations<T: RelationSet + Send + Sync> {
