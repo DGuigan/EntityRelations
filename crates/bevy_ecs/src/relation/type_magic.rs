@@ -1,4 +1,4 @@
-//struct TypePadding<const N: u8> {}
+use itertools::Itertools;
 
 // TODO: All tuple
 pub trait Lenses<Types, Target, const POS: usize> {
@@ -60,8 +60,28 @@ impl<K0, K1, P0, P1> Lenses<(K0, K1), K1, 1> for (P0, P1) {
     }
 }
 
-// (T, U) + (A, B) -> ((T, A), (U, B))
-// (T, U) + (A, NoStitch) -> ((T, A), U)
-pub trait Stitch {}
+/*pub trait FlatIterProduct {
+    type Out;
+    fn flat_iter_product(self) -> Self::Out;
+}
 
-pub trait FlatIterProduct {}
+impl<I0> FlatIterProduct for (I0,)
+where
+    I0: Iterator,
+{
+    type Out = Self;
+    fn flat_iter_product(self) -> Self::Out {
+        self
+    }
+}
+
+impl<I0, I1> FlatIterProduct for (I0, I1)
+where
+    I0: Iterator + Clone,
+    I1: Iterator + Clone,
+{
+    type Out = itertools::Product<I0, I1>;
+    fn flat_iter_product(self) -> Self::Out {
+        self.0.cartesian_product(self.1)
+    }
+}*/

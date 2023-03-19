@@ -13,12 +13,12 @@ use crate::{
     world::World,
 };
 
+mod joins;
 mod type_magic;
-//mod joins;
 //mod traversals;
 
+pub use joins::*;
 pub use type_magic::*;
-//pub use joins::*;
 //pub use traversals::*;
 
 mod sealed {
@@ -75,15 +75,15 @@ pub trait RelationSet: Sealed {
     type EmptyJoinSet: Default;
 }
 
-impl<'a, R: Relation> RelationSet for &'a R {
+impl<R: Relation> RelationSet for &'_ R {
     type Types = R;
-    type WorldQuery = (&'a Index, &'a Storage<R>);
+    type WorldQuery = (&'static Index, &'static Storage<R>);
     type EmptyJoinSet = Drop;
 }
 
-impl<'a, R: Relation> RelationSet for &'a mut R {
+impl<R: Relation> RelationSet for &'_ mut R {
     type Types = R;
-    type WorldQuery = (&'a Index, &'a mut Storage<R>);
+    type WorldQuery = (&'static Index, &'static mut Storage<R>);
     type EmptyJoinSet = Drop;
 }
 
