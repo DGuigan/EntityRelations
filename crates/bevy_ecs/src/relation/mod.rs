@@ -43,7 +43,7 @@ impl<R: Relation> Component for Storage<R> {
 }
 
 #[derive(Component)]
-pub struct Index {
+pub struct Register {
     pub(crate) targets: [HashMap<TypeId, HashMap<Entity, usize>>; 4],
     pub(crate) fosters: HashMap<TypeId, Entity>,
 }
@@ -71,48 +71,39 @@ pub struct Get;
 
 pub trait RelationSet: Sealed {
     type Types;
-    type WorldQuery: WorldQuery;
+    type Registers: WorldQuery;
+    type Storage: WorldQuery;
     type EmptyJoinSet: Default;
 }
 
 impl<R: Relation> RelationSet for &'_ R {
     type Types = R;
-    type WorldQuery = (&'static Index, &'static Storage<R>);
+    type Registers = &'static Register;
+    type Storage = &'static Storage<R>;
     type EmptyJoinSet = Drop;
 }
 
 impl<R: Relation> RelationSet for &'_ mut R {
     type Types = R;
-    type WorldQuery = (&'static Index, &'static mut Storage<R>);
+    type Registers = &'static Register;
+    type Storage = &'static mut Storage<R>;
     type EmptyJoinSet = Drop;
 }
 
-impl<T: RelationSet> RelationSet for Option<T> {
-    type Types = T::Types;
-    type WorldQuery = Option<(&'static Index, T::WorldQuery)>;
+impl<R: RelationSet> RelationSet for Option<R> {
+    type Types = R;
+    type Registers = Option<R::Registers>;
+    type Storage = Option<R::Storage>;
     type EmptyJoinSet = Drop;
 }
 
 // TODO: All tuple
 impl<P0: RelationSet> RelationSet for (P0,) {
     type Types = (P0::Types,);
-    type WorldQuery = (P0::WorldQuery,);
+    type Registers = (P0::Registers,);
+    type Storage = (P0::Storage,);
     type EmptyJoinSet = (P0::EmptyJoinSet,);
 }
-
-impl<P0, P1> RelationSet for (P0, P1)
-where
-    P0: RelationSet,
-    P1: RelationSet,
-{
-    type Types = (P0::Types, P1::Types);
-    type WorldQuery = (P0::WorldQuery, P1::WorldQuery);
-    type EmptyJoinSet = (P0::EmptyJoinSet, P1::EmptyJoinSet);
-}
-
-type FetchItem<'a, R> =
-    <<<R as RelationSet>::WorldQuery as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
-type FetchItemMut<'a, R> = <<R as RelationSet>::WorldQuery as WorldQuery>::Item<'a>;
 
 // TODO:
 // - Manual `WorldQuery` impl to get `ComponentId` from `World` to remove the usage of `TypeId`
@@ -120,7 +111,8 @@ type FetchItemMut<'a, R> = <<R as RelationSet>::WorldQuery as WorldQuery>::Item<
 #[derive(WorldQuery)]
 #[world_query(mutable)]
 pub struct Relations<T: RelationSet + Send + Sync> {
-    storages: T::WorldQuery,
+    registers: T::Registers,
+    storage: T::Storage,
     #[world_query(ignore)]
     _phantom: PhantomData<T>,
 }
