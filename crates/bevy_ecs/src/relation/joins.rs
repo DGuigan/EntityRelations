@@ -1,8 +1,9 @@
 use crate::change_detection::Mut;
 use crate::query::{ReadOnlyWorldQuery, WorldQuery};
 use crate::system::Query;
+use std::any::TypeId;
 
-use super::{type_magic::*, *};
+use super::{lens::*, *};
 
 // TODO:
 // ---- All tuple Joined impl
@@ -54,27 +55,17 @@ use super::{type_magic::*, *};
 //          making more queries disjoint.
 //
 
-pub trait Joinable<'j> {
-    type Out;
-    fn get(&'j mut self, entity: Entity) -> Option<Self::Out>;
-}
+#[derive(Default, Clone, Copy)]
+pub struct Drop;
 
-pub trait Filtered<Items> {
-    type Out: Iterator<Item = (Entity, usize)>;
-    fn filtered(self, items: &Items) -> Self::Out;
-}
+//#[derive(Default, Clone, Copy)]
+//pub struct Get;
 
-impl<Q, F> Filtered<&'_ Query<Q, F>> for &'_ Register
-where
-    Q: 'static + WorldQuery,
-    F: 'static + ReadOnlyWorldQuery,
-{
-    fn filtered(self, items: &&'_ Query<Q, F>) -> Self::Out {}
-}
+trait TargetIter {}
 
-pub trait Joined<'j, Items> {
-    type Out: Iterator;
-    fn joined(&'j mut self, items: Items) -> Self::Out;
+trait ForEachPermutations {
+    type In<'a>;
+    fn for_each(self, func: impl FnMut(Self::In<'_>));
 }
 
 /*pub trait DeclarativeJoin<'j, R, Joins, Item, const POS: usize>

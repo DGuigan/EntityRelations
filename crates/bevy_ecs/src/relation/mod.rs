@@ -14,11 +14,11 @@ use crate::{
 };
 
 mod joins;
-mod type_magic;
+mod lens;
 //mod traversals;
 
 pub use joins::*;
-pub use type_magic::*;
+pub use lens::*;
 //pub use traversals::*;
 
 mod sealed {
@@ -26,7 +26,7 @@ mod sealed {
     pub trait Sealed {}
     impl<'a, T: Relation> Sealed for &'a T {}
     impl<'a, T: Relation> Sealed for &'a mut T {}
-    impl<T: RelationSet> Sealed for Option<T> {}
+    impl<T: RelationQuerySet> Sealed for Option<T> {}
     // TODO: All tuple
     impl<P0> Sealed for (P0,) {}
     impl<P0, P1> Sealed for (P0, P1) {}
@@ -34,7 +34,7 @@ mod sealed {
 
 use sealed::*;
 
-pub struct Storage<R: Relation> {
+pub(crate) struct Storage<R: Relation> {
     pub(crate) values: SmallVec<[R; 1]>,
 }
 
@@ -43,7 +43,7 @@ impl<R: Relation> Component for Storage<R> {
 }
 
 #[derive(Component)]
-pub struct Register {
+pub(crate) struct Register {
     pub(crate) targets: [HashMap<TypeId, HashMap<Entity, usize>>; 4],
     pub(crate) fosters: HashMap<TypeId, Entity>,
 }
@@ -58,50 +58,55 @@ pub enum DespawnPolicy {
 }
 
 pub trait Relation: 'static + Sized + Send + Sync {
-    const DESPAWN_POLICY: DespawnPolicy = DespawnPolicy::Orphan;
     type Storage: ComponentStorage;
+    const DESPAWN_POLICY: DespawnPolicy = DespawnPolicy::Orphan;
     const EXCLUSIVE: bool = false;
 }
 
-#[derive(Default, Clone, Copy)]
-pub struct Drop;
+#[derive(WorldQuery)]
+pub struct StorageWorldQuery<R: Relation> {
+    storage: &'static Storage<R>,
+}
 
-#[derive(Default, Clone, Copy)]
-pub struct Get;
+#[derive(WorldQuery)]
+#[world_query(mutable)]
+pub struct StorageWorldQueryMut<R: Relation> {
+    storage: &'static mut Storage<R>,
+}
 
-pub trait RelationSet: Sealed {
+#[derive(WorldQuery)]
+pub struct RegisterWorldQuery {
+    register: &'static Register,
+}
+
+pub trait RelationQuerySet: Sealed {
     type Types;
-    type Registers: WorldQuery;
-    type Storage: WorldQuery;
+    type WorldQuery: WorldQuery;
     type EmptyJoinSet: Default;
 }
 
-impl<R: Relation> RelationSet for &'_ R {
+impl<R: Relation> RelationQuerySet for &'_ R {
     type Types = R;
-    type Registers = &'static Register;
-    type Storage = &'static Storage<R>;
+    type WorldQuery = StorageWorldQuery<R>;
     type EmptyJoinSet = Drop;
 }
 
-impl<R: Relation> RelationSet for &'_ mut R {
+impl<R: Relation> RelationQuerySet for &'_ mut R {
     type Types = R;
-    type Registers = &'static Register;
-    type Storage = &'static mut Storage<R>;
+    type WorldQuery = StorageWorldQueryMut<R>;
     type EmptyJoinSet = Drop;
 }
 
-impl<R: RelationSet> RelationSet for Option<R> {
+impl<R: RelationQuerySet> RelationQuerySet for Option<R> {
     type Types = R;
-    type Registers = Option<R::Registers>;
-    type Storage = Option<R::Storage>;
+    type WorldQuery = Option<R::WorldQuery>;
     type EmptyJoinSet = Drop;
 }
 
 // TODO: All tuple
-impl<P0: RelationSet> RelationSet for (P0,) {
+impl<P0: RelationQuerySet> RelationQuerySet for (P0,) {
     type Types = (P0::Types,);
-    type Registers = (P0::Registers,);
-    type Storage = (P0::Storage,);
+    type WorldQuery = (P0::WorldQuery,);
     type EmptyJoinSet = (P0::EmptyJoinSet,);
 }
 
@@ -110,9 +115,9 @@ impl<P0: RelationSet> RelationSet for (P0,) {
 // - `TypeId` is not guarenteed to be stable which is a problem for serialization.
 #[derive(WorldQuery)]
 #[world_query(mutable)]
-pub struct Relations<T: RelationSet + Send + Sync> {
-    registers: T::Registers,
-    storage: T::Storage,
+pub struct Relations<T: RelationQuerySet + Send + Sync> {
+    register: &'static Register,
+    world_query: T::WorldQuery,
     #[world_query(ignore)]
     _phantom: PhantomData<T>,
 }
@@ -128,7 +133,7 @@ impl<'w, 's, Q, F, R> Query<'w, 's, (Q, Relations<R>), F>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
-    R: RelationSet + Send + Sync,
+    R: RelationQuerySet + Send + Sync,
 {
     fn ops(&self) -> Ops<&Self, R::EmptyJoinSet> {
         Ops {
