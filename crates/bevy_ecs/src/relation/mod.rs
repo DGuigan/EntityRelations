@@ -82,32 +82,27 @@ pub struct RegisterWorldQuery {
 pub trait RelationQuerySet: Sealed {
     type Types;
     type WorldQuery: WorldQuery;
-    type EmptyJoinSet: Default;
 }
 
 impl<R: Relation> RelationQuerySet for &'_ R {
     type Types = R;
     type WorldQuery = StorageWorldQuery<R>;
-    type EmptyJoinSet = Drop;
 }
 
 impl<R: Relation> RelationQuerySet for &'_ mut R {
     type Types = R;
     type WorldQuery = StorageWorldQueryMut<R>;
-    type EmptyJoinSet = Drop;
 }
 
 impl<R: RelationQuerySet> RelationQuerySet for Option<R> {
     type Types = R;
     type WorldQuery = Option<R::WorldQuery>;
-    type EmptyJoinSet = Drop;
 }
 
 // TODO: All tuple
 impl<P0: RelationQuerySet> RelationQuerySet for (P0,) {
     type Types = (P0::Types,);
     type WorldQuery = (P0::WorldQuery,);
-    type EmptyJoinSet = (P0::EmptyJoinSet,);
 }
 
 // TODO:
@@ -122,11 +117,11 @@ pub struct Relations<T: RelationQuerySet + Send + Sync> {
     _phantom: PhantomData<T>,
 }
 
-pub struct Ops<Query, Joins, Traversal = (), TraversalQueue = ()> {
+pub struct Ops<Query, Joins = (), Traversal = (), Extractions = ()> {
     query: Query,
     joins: Joins,
     traversal: Traversal,
-    queue: TraversalQueue,
+    _phantom: PhantomData<Extractions>,
 }
 
 impl<'w, 's, Q, F, R> Query<'w, 's, (Q, Relations<R>), F>
@@ -135,21 +130,21 @@ where
     F: 'static + ReadOnlyWorldQuery,
     R: RelationQuerySet + Send + Sync,
 {
-    fn ops(&self) -> Ops<&Self, R::EmptyJoinSet> {
+    fn ops(&self) -> Ops<&Self> {
         Ops {
             query: self,
-            joins: R::EmptyJoinSet::default(),
+            joins: (),
             traversal: (),
-            queue: (),
+            _phantom: PhantomData,
         }
     }
 
-    fn ops_mut(&mut self) -> Ops<&mut Self, R::EmptyJoinSet> {
+    fn ops_mut(&mut self) -> Ops<&mut Self> {
         Ops {
             query: self,
-            joins: R::EmptyJoinSet::default(),
+            joins: (),
             traversal: (),
-            queue: (),
+            _phantom: PhantomData,
         }
     }
 }

@@ -1,3 +1,8 @@
+use super::{Register, Relation, Storage};
+use crate::prelude::Entity;
+use bevy_utils::HashMap;
+use std::any::TypeId;
+
 // TODO: All tuple
 pub trait TypedLens<Types, Target, const POS: usize> {
     type Get;
@@ -103,6 +108,13 @@ impl<'a, T> TupleAppend for &'a T {
     }
 }
 
+impl TupleAppend for () {
+    type Out<Item> = (Item,);
+    fn append<Item>(self, item: Item) -> Self::Out<Item> {
+        (item,)
+    }
+}
+
 impl<P0> TupleAppend for (P0,) {
     type Out<Item> = (P0, Item);
     fn append<Item>(self, item: Item) -> Self::Out<Item> {
@@ -130,5 +142,82 @@ impl<P0, P1, P2, P3> TupleAppend for (P0, P1, P2, P3) {
     type Out<Item> = Self;
     fn append<Item>(self, _: Item) -> Self::Out<Item> {
         self
+    }
+}
+
+// TODO: Replace with TAITs when TAITs land
+// TODO: Replace with frog types when frog types land
+type TargetIter<'i> = std::iter::Map<
+    bevy_utils::hashbrown::hash_map::Iter<'i, Entity, usize>,
+    for<'a, 'b> fn((&'a Entity, &'b usize)) -> (Entity, usize),
+>;
+
+fn deref_pair((e, i): (&Entity, &usize)) -> (Entity, usize) {
+    (*e, *i)
+}
+
+fn map_to_iter(map: &HashMap<Entity, usize>) -> TargetIter<'_> {
+    map.iter().map(deref_pair)
+}
+
+trait TargetIters<Extractions> {
+    type Out<'a>
+    where
+        Self: 'a;
+    fn target_iters(&self) -> Self::Out<'_>;
+}
+
+impl<P0: Relation> TargetIters<(P0,)> for Register {
+    type Out<'a> = std::option::IntoIter<TargetIter<'a>>;
+    fn target_iters(&self) -> Self::Out<'_> {
+        self.targets[P0::DESPAWN_POLICY as usize]
+            .get(&TypeId::of::<Storage<P0>>())
+            .map(map_to_iter)
+            .into_iter()
+    }
+}
+
+impl<P0: Relation, P1: Relation> TargetIters<(P0, P1)> for Register {
+    type Out<'a> = (
+        std::option::IntoIter<TargetIter<'a>>,
+        std::option::IntoIter<TargetIter<'a>>,
+    );
+
+    fn target_iters(&self) -> Self::Out<'_> {
+        (
+            self.targets[P0::DESPAWN_POLICY as usize]
+                .get(&TypeId::of::<Storage<P0>>())
+                .map(map_to_iter)
+                .into_iter(),
+            self.targets[P1::DESPAWN_POLICY as usize]
+                .get(&TypeId::of::<Storage<P1>>())
+                .map(map_to_iter)
+                .into_iter(),
+        )
+    }
+}
+
+impl<P0: Relation, P1: Relation, P2: Relation> TargetIters<(P0, P1, P2)> for Register {
+    type Out<'a> = (
+        std::option::IntoIter<TargetIter<'a>>,
+        std::option::IntoIter<TargetIter<'a>>,
+        std::option::IntoIter<TargetIter<'a>>,
+    );
+
+    fn target_iters(&self) -> Self::Out<'_> {
+        (
+            self.targets[P0::DESPAWN_POLICY as usize]
+                .get(&TypeId::of::<Storage<P0>>())
+                .map(map_to_iter)
+                .into_iter(),
+            self.targets[P1::DESPAWN_POLICY as usize]
+                .get(&TypeId::of::<Storage<P1>>())
+                .map(map_to_iter)
+                .into_iter(),
+            self.targets[P2::DESPAWN_POLICY as usize]
+                .get(&TypeId::of::<Storage<P2>>())
+                .map(map_to_iter)
+                .into_iter(),
+        )
     }
 }

@@ -55,13 +55,14 @@ use super::{lens::*, *};
 //          making more queries disjoint.
 //
 
-#[derive(Default, Clone, Copy)]
-pub struct Drop;
+struct Joinable<Query = (), Storage = ()> {
+    query: Query,
+    storage: Storage,
+}
 
-//#[derive(Default, Clone, Copy)]
-//pub struct Get;
-
-trait TargetIter {}
+// Query = (), Storage = Storage<R>: left join
+// Query = Query, Storage = (): Join without relation val
+// Query = Query, Storage = Storage<R>: full inner join
 
 trait ForEachPermutations {
     type In<'a>;
