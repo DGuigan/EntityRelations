@@ -14,11 +14,11 @@ use crate::{
 };
 
 mod joins;
-mod lens;
+mod tuple_traits;
 //mod traversals;
 
 pub use joins::*;
-pub use lens::*;
+pub use tuple_traits::*;
 //pub use traversals::*;
 
 mod sealed {
@@ -34,6 +34,12 @@ mod sealed {
 
 use sealed::*;
 
+// TODO: Remove tombstones
+// - Removing a target entity won't reove relation valeus any fosters have to it
+// - Store relation values as `(Storage<R>)` entities and replace `usize` with `Entity`
+// - Cleanup code can just remove entites without knowing relation type
+// - Need manual WorldQuery impl that hides this archetype access
+// - Uphold invariants to ensure soundness
 pub(crate) struct Storage<R: Relation> {
     pub(crate) values: SmallVec<[R; 1]>,
 }
@@ -46,6 +52,16 @@ impl<R: Relation> Component for Storage<R> {
 pub(crate) struct Register {
     pub(crate) targets: [HashMap<TypeId, HashMap<Entity, usize>>; 4],
     pub(crate) fosters: HashMap<TypeId, Entity>,
+}
+
+impl Register {
+    fn target_iter<R: Relation>(&self) -> impl '_ + Clone + Iterator<Item = (Entity, usize)> {
+        self.targets[R::DESPAWN_POLICY as usize]
+            .get(&TypeId::of::<Storage<R>>())
+            .map(|map| map.iter().map(|(e, i)| (*e, *i)))
+            .into_iter()
+            .flatten()
+    }
 }
 
 // Precedence: Most data latering operation is preferred.
@@ -117,11 +133,12 @@ pub struct Relations<T: RelationQuerySet + Send + Sync> {
     _phantom: PhantomData<T>,
 }
 
-pub struct Ops<Query, Joins = (), Traversal = (), Extractions = ()> {
+pub struct Ops<Query, TargetIters = (), StorageExtractions = (), JoinQueries = (), Traversal = ()> {
     query: Query,
-    joins: Joins,
-    traversal: Traversal,
-    _phantom: PhantomData<Extractions>,
+    target_iters: TargetIters,
+    storage_extractions: PhantomData<StorageExtractions>,
+    join_queries: JoinQueries,
+    traversal: PhantomData<Traversal>,
 }
 
 impl<'w, 's, Q, F, R> Query<'w, 's, (Q, Relations<R>), F>
@@ -133,25 +150,29 @@ where
     fn ops(&self) -> Ops<&Self> {
         Ops {
             query: self,
-            joins: (),
-            traversal: (),
-            _phantom: PhantomData,
+            target_iters: (),
+            storage_extractions: PhantomData,
+            join_queries: (),
+            traversal: PhantomData,
         }
     }
 
     fn ops_mut(&mut self) -> Ops<&mut Self> {
         Ops {
             query: self,
-            joins: (),
-            traversal: (),
-            _phantom: PhantomData,
+            target_iters: (),
+            storage_extractions: PhantomData,
+            join_queries: (),
+            traversal: PhantomData,
         }
     }
 }
 
-// Lending iterator workaround
-// - https://blog.rust-lang.org/2022/10/28/gats-stabilization.html#implied-static-requirement-from-higher-ranked-trait-bounds
-pub trait LendingForEach {
-    type In<'e, 'j>;
-    fn for_each(self, func: impl FnMut(Self::In<'_, '_>));
+/*pub(crate) type FetchItem<'a, R> =
+    <<<R as RelationSet>::WorldQuery as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
+pub(crate) type FetchItemMut<'a, R> = <<R as RelationSet>::WorldQuery as WorldQuery>::Item<'a>;*/
+
+pub trait ForEachPermutations {
+    type In<'a>;
+    fn for_each(self, func: impl FnMut(Self::In<'_>));
 }
