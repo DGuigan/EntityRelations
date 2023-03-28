@@ -49,12 +49,12 @@ impl<R: Relation> Component for Storage<R> {
 }
 
 #[derive(Component)]
-pub(crate) struct Register {
+pub(crate) struct Edges {
     pub(crate) targets: [HashMap<TypeId, HashMap<Entity, usize>>; 4],
     pub(crate) fosters: HashMap<TypeId, Entity>,
 }
 
-impl Register {
+impl Edges {
     fn target_iter<R: Relation>(&self) -> impl '_ + Clone + Iterator<Item = (Entity, usize)> {
         self.targets[R::DESPAWN_POLICY as usize]
             .get(&TypeId::of::<Storage<R>>())
@@ -80,6 +80,11 @@ pub trait Relation: 'static + Sized + Send + Sync {
 }
 
 #[derive(WorldQuery)]
+struct S<'a> {
+    s: &'a Edges,
+}
+
+#[derive(WorldQuery)]
 pub struct StorageWorldQuery<R: Relation> {
     storage: &'static Storage<R>,
 }
@@ -91,11 +96,11 @@ pub struct StorageWorldQueryMut<R: Relation> {
 }
 
 #[derive(WorldQuery)]
-pub struct RegisterWorldQuery {
-    register: &'static Register,
+pub struct EdgesWorldQuery {
+    register: &'static Edges,
 }
 
-pub trait RelationQuerySet: Sealed {
+pub trait RelationQuerySet: Sealed + Send + Sync {
     type Types;
     type WorldQuery: WorldQuery;
 }
@@ -126,19 +131,19 @@ impl<P0: RelationQuerySet> RelationQuerySet for (P0,) {
 // - `TypeId` is not guarenteed to be stable which is a problem for serialization.
 #[derive(WorldQuery)]
 #[world_query(mutable)]
-pub struct Relations<T: RelationQuerySet + Send + Sync> {
-    register: &'static Register,
+pub struct Relations<T: RelationQuerySet> {
+    register: &'static Edges,
     world_query: T::WorldQuery,
     #[world_query(ignore)]
     _phantom: PhantomData<T>,
 }
 
-pub struct Ops<Query, TargetIters = (), StorageExtractions = (), JoinQueries = (), Traversal = ()> {
+pub struct Ops<Query, Traversal = (), Extractions = (), StorageFilters = (), Joins = ()> {
     query: Query,
-    target_iters: TargetIters,
-    storage_extractions: PhantomData<StorageExtractions>,
-    join_queries: JoinQueries,
     traversal: PhantomData<Traversal>,
+    extractions: PhantomData<Extractions>,
+    storage_filters: StorageFilters,
+    joins: Joins,
 }
 
 impl<'w, 's, Q, F, R> Query<'w, 's, (Q, Relations<R>), F>
@@ -150,20 +155,20 @@ where
     fn ops(&self) -> Ops<&Self> {
         Ops {
             query: self,
-            target_iters: (),
-            storage_extractions: PhantomData,
-            join_queries: (),
             traversal: PhantomData,
+            extractions: PhantomData,
+            storage_filters: (),
+            joins: (),
         }
     }
 
     fn ops_mut(&mut self) -> Ops<&mut Self> {
         Ops {
             query: self,
-            target_iters: (),
-            storage_extractions: PhantomData,
-            join_queries: (),
             traversal: PhantomData,
+            extractions: PhantomData,
+            storage_filters: (),
+            joins: (),
         }
     }
 }

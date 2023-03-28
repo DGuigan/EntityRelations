@@ -10,6 +10,27 @@ use super::{tuple_traits::*, *};
 // O _ _: Left Join
 // O S _: Full left Join
 
+pub struct Drop;
+pub struct Keep;
+pub struct Wrap;
+
+trait Filtered<Filtereds> {
+    type Out;
+    fn filtered(self) -> Self::Out;
+}
+
+impl<T> Filtered<Keep> for T {
+    type Out = T;
+    fn filtered(self) -> Self::Out {
+        self
+    }
+}
+
+impl<T> Filtered<Drop> for T {
+    type Out = ();
+    fn filtered(self) -> Self::Out {}
+}
+
 trait Join<'q, 'r, Target, Storage> {
     type Out;
     fn matches(&self, target: &Target) -> bool;
@@ -151,9 +172,81 @@ where
     }
 }
 
-pub trait DeclarativeJoin<R, Joins, Item, const POS: usize> {
-    type JoinOut<T>;
-    fn join<T>(self, item: Item) -> Self::JoinOut<T>;
+pub trait DeclarativeJoin<R, Item> {
+    type JoinOut<T: Relation>;
+    fn join<T: Relation>(self, item: Item) -> Self::JoinOut<T>;
+}
+
+impl<'q, 'w, 's, Q, R, F, Traversal, Extractions, StorageFiltereds, Joins, Item>
+    DeclarativeJoin<R, Item>
+    for Ops<
+        &'q Query<'w, 's, (Q, Relations<R>), F>,
+        Traversal,
+        Extractions,
+        StorageFiltereds,
+        Joins,
+    >
+where
+    Extractions: Append,
+    StorageFiltereds: Append,
+    Joins: Append,
+    Q: 'static + WorldQuery,
+    F: 'static + ReadOnlyWorldQuery,
+    R: RelationQuerySet,
+{
+    type JoinOut<T: Relation> = Ops<
+        &'q Query<'w, 's, (Q, Relations<R>), F>,
+        Traversal,
+        <Extractions as Append>::Out<T>,
+        <StorageFiltereds as Append>::Out<Drop>,
+        <Joins as Append>::Out<Item>,
+    >;
+
+    fn join<T: Relation>(self, item: Item) -> Self::JoinOut<T> {
+        Ops {
+            query: self.query,
+            traversal: PhantomData,
+            extractions: PhantomData,
+            storage_filters: self.storage_filters.append(Drop),
+            joins: self.joins.append(item),
+        }
+    }
+}
+
+impl<'q, 'w, 's, Q, R, F, Traversal, Extractions, StorageFiltereds, Joins, Item>
+    DeclarativeJoin<R, Item>
+    for Ops<
+        &'q mut Query<'w, 's, (Q, Relations<R>), F>,
+        Traversal,
+        Extractions,
+        StorageFiltereds,
+        Joins,
+    >
+where
+    Extractions: Append,
+    StorageFiltereds: Append,
+    Joins: Append,
+    Q: 'static + WorldQuery,
+    F: 'static + ReadOnlyWorldQuery,
+    R: RelationQuerySet,
+{
+    type JoinOut<T: Relation> = Ops<
+        &'q mut Query<'w, 's, (Q, Relations<R>), F>,
+        Traversal,
+        <Extractions as Append>::Out<T>,
+        <StorageFiltereds as Append>::Out<Drop>,
+        <Joins as Append>::Out<Item>,
+    >;
+
+    fn join<T: Relation>(self, item: Item) -> Self::JoinOut<T> {
+        Ops {
+            query: self.query,
+            traversal: PhantomData,
+            extractions: PhantomData,
+            storage_filters: self.storage_filters.append(Drop),
+            joins: self.joins.append(item),
+        }
+    }
 }
 
 /*impl<'j, 'o, 'w, 's, Q, F, R, Joins, Item, Traversal, Path, const POS: usize>
