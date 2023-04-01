@@ -24,6 +24,8 @@ pub use tuple_traits::*;
 mod sealed {
     use super::*;
     pub trait Sealed {}
+    impl Sealed for ControlFlow {}
+    impl Sealed for () {}
     impl<'a, T: Relation> Sealed for &'a T {}
     impl<'a, T: Relation> Sealed for &'a mut T {}
     impl<T: RelationQuerySet> Sealed for Option<T> {}
@@ -80,11 +82,6 @@ pub trait Relation: 'static + Sized + Send + Sync {
 }
 
 #[derive(WorldQuery)]
-struct S<'a> {
-    s: &'a Edges,
-}
-
-#[derive(WorldQuery)]
 pub struct StorageWorldQuery<R: Relation> {
     storage: &'static Storage<R>,
 }
@@ -103,27 +100,32 @@ pub struct EdgesWorldQuery {
 pub trait RelationQuerySet: Sealed + Send + Sync {
     type Types;
     type WorldQuery: WorldQuery;
+    type ColsWith<T: Default>: Default;
 }
 
 impl<R: Relation> RelationQuerySet for &'_ R {
     type Types = R;
     type WorldQuery = StorageWorldQuery<R>;
+    type ColsWith<T: Default> = T;
 }
 
 impl<R: Relation> RelationQuerySet for &'_ mut R {
     type Types = R;
     type WorldQuery = StorageWorldQueryMut<R>;
+    type ColsWith<T: Default> = T;
 }
 
 impl<R: RelationQuerySet> RelationQuerySet for Option<R> {
     type Types = R;
     type WorldQuery = Option<R::WorldQuery>;
+    type ColsWith<T: Default> = R::ColsWith<T>;
 }
 
 // TODO: All tuple
 impl<P0: RelationQuerySet> RelationQuerySet for (P0,) {
     type Types = (P0::Types,);
     type WorldQuery = (P0::WorldQuery,);
+    type ColsWith<T: Default> = (P0::ColsWith<T>,);
 }
 
 // TODO:
@@ -138,12 +140,11 @@ pub struct Relations<T: RelationQuerySet> {
     _phantom: PhantomData<T>,
 }
 
-pub struct Ops<Query, Traversal = (), Extractions = (), StorageFilters = (), Joins = ()> {
+pub struct Ops<Query, Joins, Filters, Traversal = ()> {
     query: Query,
-    traversal: PhantomData<Traversal>,
-    extractions: PhantomData<Extractions>,
-    storage_filters: StorageFilters,
     joins: Joins,
+    filters: Filters,
+    traversal: PhantomData<Traversal>,
 }
 
 impl<'w, 's, Q, F, R> Query<'w, 's, (Q, Relations<R>), F>
@@ -152,23 +153,21 @@ where
     F: 'static + ReadOnlyWorldQuery,
     R: RelationQuerySet + Send + Sync,
 {
-    fn ops(&self) -> Ops<&Self> {
+    fn ops(&self) -> Ops<&Self, R::ColsWith<()>, R::ColsWith<Drop>> {
         Ops {
             query: self,
+            joins: R::ColsWith::<()>::default(),
+            filters: R::ColsWith::<Drop>::default(),
             traversal: PhantomData,
-            extractions: PhantomData,
-            storage_filters: (),
-            joins: (),
         }
     }
 
-    fn ops_mut(&mut self) -> Ops<&mut Self> {
+    fn ops_mut(&mut self) -> Ops<&mut Self, R::ColsWith<()>, R::ColsWith<Drop>> {
         Ops {
             query: self,
+            joins: R::ColsWith::<()>::default(),
+            filters: R::ColsWith::<Drop>::default(),
             traversal: PhantomData,
-            extractions: PhantomData,
-            storage_filters: (),
-            joins: (),
         }
     }
 }
@@ -177,7 +176,31 @@ where
     <<<R as RelationSet>::WorldQuery as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
 pub(crate) type FetchItemMut<'a, R> = <<R as RelationSet>::WorldQuery as WorldQuery>::Item<'a>;*/
 
+pub enum ControlFlow {
+    Exit,
+    Continue,
+}
+
+pub trait IntoControlFlow: Sealed {
+    fn into_control_flow(self) -> ControlFlow;
+}
+
+impl IntoControlFlow for () {
+    fn into_control_flow(self) -> ControlFlow {
+        ControlFlow::Continue
+    }
+}
+
+impl IntoControlFlow for ControlFlow {
+    fn into_control_flow(self) -> ControlFlow {
+        self
+    }
+}
+
 pub trait ForEachPermutations {
     type In<'a>;
-    fn for_each(self, func: impl FnMut(Self::In<'_>));
+    fn for_each<F, R>(self, func: F)
+    where
+        R: IntoControlFlow,
+        F: FnMut(Self::In<'_>) -> R;
 }

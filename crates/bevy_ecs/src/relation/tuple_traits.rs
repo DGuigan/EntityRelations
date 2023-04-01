@@ -4,61 +4,35 @@ use bevy_utils::HashMap;
 use std::any::TypeId;
 
 // TODO: All tuple
-pub trait Lenses<Types, Target, const POS: usize> {
-    type Get;
-    type Set<Input>;
-    fn get(&self) -> &Self::Get;
-    fn set<Input>(self, value: Input) -> Self::Set<Input>;
+pub trait TypedSet<Types, Target, const POS: usize> {
+    type Out<Input>;
+    fn set<Input>(self, value: Input) -> Self::Out<Input>;
 }
 
-impl<K0, P0> Lenses<K0, K0, 0> for P0 {
-    type Get = Self;
-    type Set<Input> = Input;
-
-    fn get(&self) -> &Self::Get {
-        self
-    }
-
-    fn set<Input>(self, value: Input) -> Self::Set<Input> {
+impl<K0, P0> TypedSet<K0, K0, 0> for P0 {
+    type Out<Input> = Input;
+    fn set<Input>(self, value: Input) -> Self::Out<Input> {
         value
     }
 }
 
-impl<K0, P0> Lenses<(K0,), K0, 0> for (P0,) {
-    type Get = P0;
-    type Set<Input> = (Input,);
-
-    fn get(&self) -> &Self::Get {
-        &self.0
-    }
-
-    fn set<Input>(self, value: Input) -> Self::Set<Input> {
+impl<K0, P0> TypedSet<(K0,), K0, 0> for (P0,) {
+    type Out<Input> = (Input,);
+    fn set<Input>(self, value: Input) -> Self::Out<Input> {
         (value,)
     }
 }
 
-impl<K0, K1, P0, P1> Lenses<(K0, K1), K0, 0> for (P0, P1) {
-    type Get = P0;
-    type Set<Input> = (Input, P1);
-
-    fn get(&self) -> &Self::Get {
-        &self.0
-    }
-
-    fn set<Input>(self, value: Input) -> Self::Set<Input> {
+impl<K0, K1, P0, P1> TypedSet<(K0, K1), K0, 0> for (P0, P1) {
+    type Out<Input> = (Input, P1);
+    fn set<Input>(self, value: Input) -> Self::Out<Input> {
         (value, self.1)
     }
 }
 
-impl<K0, K1, P0, P1> Lenses<(K0, K1), K1, 1> for (P0, P1) {
-    type Get = P1;
-    type Set<Input> = (P0, Input);
-
-    fn get(&self) -> &Self::Get {
-        &self.1
-    }
-
-    fn set<Input>(self, value: Input) -> Self::Set<Input> {
+impl<K0, K1, P0, P1> TypedSet<(K0, K1), K1, 1> for (P0, P1) {
+    type Out<Input> = (P0, Input);
+    fn set<Input>(self, value: Input) -> Self::Out<Input> {
         (self.0, value)
     }
 }

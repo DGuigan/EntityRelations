@@ -10,9 +10,9 @@ use super::{tuple_traits::*, *};
 // O _ _: Left Join
 // O S _: Full left Join
 
+#[derive(Default)]
 pub struct Drop;
 pub struct Keep;
-pub struct Wrap;
 
 trait Filtered<Filtereds> {
     type Out;
@@ -31,333 +31,362 @@ impl<T> Filtered<Drop> for T {
     fn filtered(self) -> Self::Out {}
 }
 
-trait Join<'q, 'r, Target, Storage> {
-    type Out;
-    fn matches(&self, target: &Target) -> bool;
-    fn joined(&'q mut self, target: Target, storage: &'r mut Storage) -> Self::Out;
+impl<P0, F0> Filtered<(F0,)> for (P0,)
+where
+    P0: Filtered<F0>,
+{
+    type Out = (P0::Out,);
+    fn filtered(self) -> Self::Out {
+        (self.0.filtered(),)
+    }
 }
 
-impl<'q, 'r, 'w, 's, Q, F> Join<'q, 'r, (Entity, usize), ()> for &'q Query<'w, 's, Q, F>
+pub trait Joinable {}
+
+impl<Q, F> Joinable for &'_ Query<'_, '_, Q, F>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
 {
-    type Out = <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'q>;
+}
 
-    fn matches(&self, target: &(Entity, usize)) -> bool {
-        (**self).get(target.0).is_ok()
-    }
+impl<Q, F> Joinable for &'_ mut Query<'_, '_, Q, F>
+where
+    Q: 'static + WorldQuery,
+    F: 'static + ReadOnlyWorldQuery,
+{
+}
 
-    fn joined(&'q mut self, target: (Entity, usize), _storage: &'r mut ()) -> Self::Out {
-        (**self).get(target.0).unwrap()
+pub trait Join<'j, Storage> {
+    type Out;
+    fn matches(&self, target: Entity) -> bool;
+    fn joined(&'j mut self, target_info: (Entity, usize), storage: &'j mut Storage) -> Self::Out;
+}
+
+impl<I0, S0, J0> ForEachPermutations for ((I0,), (S0,), (J0,))
+where
+    I0: Iterator<Item = (Entity, usize)>,
+    J0: for<'j> Join<'j, S0>,
+{
+    type In<'a> = <J0 as Join<'a, S0>>::Out;
+    fn for_each<F, R>(self, mut func: F)
+    where
+        R: IntoControlFlow,
+        F: FnMut(Self::In<'_>) -> R,
+    {
+        let ((items0,), (mut storage0,), (mut joins0,)) = self;
+        for i0 in items0 {
+            if !joins0.matches(i0.0) {
+                continue;
+            }
+            if let ControlFlow::Exit = func(joins0.joined(i0, &mut storage0)).into_control_flow() {
+                return;
+            }
+        }
     }
 }
 
-impl<'q, 'r, 'w, 's, Q, F, R> Join<'q, 'r, (Entity, usize), StorageWorldQuery<R>>
-    for &'q Query<'w, 's, Q, F>
+impl<I0, I1, S0, S1, J0, J1> ForEachPermutations for ((I0, I1), (S0, S1), (J0, J1))
+where
+    I0: Clone + Iterator<Item = (Entity, usize)>,
+    I1: Clone + Iterator<Item = (Entity, usize)>,
+    J0: for<'j> Join<'j, S0>,
+    J1: for<'j> Join<'j, S1>,
+{
+    type In<'a> = (<J0 as Join<'a, S0>>::Out, <J1 as Join<'a, S1>>::Out);
+    fn for_each<F, R>(self, mut func: F)
+    where
+        R: IntoControlFlow,
+        F: FnMut(Self::In<'_>) -> R,
+    {
+        let ((items0, items1), (mut storage0, mut storage1), (mut joins0, mut joins1)) = self;
+        for i0 in items0 {
+            if !joins0.matches(i0.0) {
+                continue;
+            }
+            for i1 in items1.clone() {
+                if !joins1.matches(i1.0) {
+                    continue;
+                }
+                if let ControlFlow::Exit = func((
+                    joins0.joined(i0, &mut storage0),
+                    joins1.joined(i1, &mut storage1),
+                ))
+                .into_control_flow()
+                {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+impl<I0, I1, I2, S0, S1, S2, J0, J1, J2> ForEachPermutations
+    for ((I0, I1, I2), (S0, S1, S2), (J0, J1, J2))
+where
+    I0: Clone + Iterator<Item = (Entity, usize)>,
+    I1: Clone + Iterator<Item = (Entity, usize)>,
+    I2: Clone + Iterator<Item = (Entity, usize)>,
+    J0: for<'j> Join<'j, S0>,
+    J1: for<'j> Join<'j, S1>,
+    J2: for<'j> Join<'j, S2>,
+{
+    type In<'a> = (
+        <J0 as Join<'a, S0>>::Out,
+        <J1 as Join<'a, S1>>::Out,
+        <J2 as Join<'a, S2>>::Out,
+    );
+    fn for_each<F, R>(self, mut func: F)
+    where
+        R: IntoControlFlow,
+        F: FnMut(Self::In<'_>) -> R,
+    {
+        let (
+            (items0, items1, items2),
+            (mut storage0, mut storage1, mut storage2),
+            (mut joins0, mut joins1, mut joins2),
+        ) = self;
+        for i0 in items0 {
+            if !joins0.matches(i0.0) {
+                continue;
+            }
+            for i1 in items1.clone() {
+                if !joins1.matches(i1.0) {
+                    continue;
+                }
+                for i2 in items2.clone() {
+                    if !joins2.matches(i2.0) {
+                        continue;
+                    }
+                    if let ControlFlow::Exit = func((
+                        joins0.joined(i0, &mut storage0),
+                        joins1.joined(i1, &mut storage1),
+                        joins2.joined(i2, &mut storage2),
+                    ))
+                    .into_control_flow()
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<'j, Q, F> Join<'j, ()> for &'_ Query<'_, '_, Q, F>
+where
+    Q: 'static + WorldQuery,
+    F: 'static + ReadOnlyWorldQuery,
+{
+    type Out = <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'j>;
+
+    fn matches(&self, target: Entity) -> bool {
+        (**self).get(target).is_ok()
+    }
+
+    fn joined(&'j mut self, (target, _index): (Entity, usize), _storage: &'j mut ()) -> Self::Out {
+        (**self).get(target).unwrap()
+    }
+}
+
+impl<'j, Q, F, R> Join<'j, StorageWorldQuery<R>> for &'_ Query<'_, '_, Q, F>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
     R: Relation,
 {
-    type Out = (&'r R, <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'q>);
+    type Out = (&'j R, <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'j>);
 
-    fn matches(&self, target: &(Entity, usize)) -> bool {
-        (**self).get(target.0).is_ok()
+    fn matches(&self, target: Entity) -> bool {
+        (**self).get(target).is_ok()
     }
 
     fn joined(
-        &'q mut self,
-        target: (Entity, usize),
-        storage: &'r mut StorageWorldQuery<R>,
+        &'j mut self,
+        (target, index): (Entity, usize),
+        storage: &'j mut StorageWorldQuery<R>,
     ) -> Self::Out {
         (
-            &storage.storage.values[target.1],
-            (**self).get(target.0).unwrap(),
+            &storage.storage.values[index],
+            (**self).get(target).unwrap(),
         )
     }
 }
 
-impl<'q, 'r, 'w, 's, Q, F, R> Join<'q, 'r, (Entity, usize), StorageWorldQueryMut<R>>
-    for &'q Query<'w, 's, Q, F>
+impl<'j, Q, F, R> Join<'j, StorageWorldQueryMut<R>> for &'_ Query<'_, '_, Q, F>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
     R: Relation,
 {
     type Out = (
-        &'r mut R,
-        <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'q>,
+        &'j mut R,
+        <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'j>,
     );
 
-    fn matches(&self, target: &(Entity, usize)) -> bool {
-        (**self).get(target.0).is_ok()
+    fn matches(&self, target: Entity) -> bool {
+        (**self).get(target).is_ok()
     }
 
     fn joined(
-        &'q mut self,
-        target: (Entity, usize),
-        storage: &'r mut StorageWorldQueryMut<R>,
+        &'j mut self,
+        (target, index): (Entity, usize),
+        storage: &'j mut StorageWorldQueryMut<R>,
     ) -> Self::Out {
         (
-            &mut storage.storage.values[target.1],
-            (**self).get(target.0).unwrap(),
+            &mut storage.storage.values[index],
+            (**self).get(target).unwrap(),
         )
     }
 }
 
-impl<'q, 'r, 'w, 's, Q, F> Join<'q, 'r, (Entity, usize), ()> for &'q mut Query<'w, 's, Q, F>
+impl<'j, Q, F> Join<'j, ()> for &'_ mut Query<'_, '_, Q, F>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
 {
-    type Out = <Q as WorldQuery>::Item<'q>;
+    type Out = <Q as WorldQuery>::Item<'j>;
 
-    fn matches(&self, target: &(Entity, usize)) -> bool {
-        (**self).get(target.0).is_ok()
+    fn matches(&self, target: Entity) -> bool {
+        (**self).get(target).is_ok()
     }
 
-    fn joined(&'q mut self, target: (Entity, usize), _storage: &'r mut ()) -> Self::Out {
-        (**self).get_mut(target.0).unwrap()
+    fn joined(&'j mut self, (target, _index): (Entity, usize), _storage: &'j mut ()) -> Self::Out {
+        (**self).get_mut(target).unwrap()
     }
 }
 
-impl<'q, 'r, 'w, 's, Q, F, R> Join<'q, 'r, (Entity, usize), StorageWorldQuery<R>>
-    for &'q mut Query<'w, 's, Q, F>
+impl<'j, Q, F, R> Join<'j, StorageWorldQuery<R>> for &'_ mut Query<'_, '_, Q, F>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
     R: Relation,
 {
-    type Out = (&'r R, <Q as WorldQuery>::Item<'q>);
+    type Out = (&'j R, <Q as WorldQuery>::Item<'j>);
 
-    fn matches(&self, target: &(Entity, usize)) -> bool {
-        (**self).get(target.0).is_ok()
+    fn matches(&self, target: Entity) -> bool {
+        (**self).get(target).is_ok()
     }
 
     fn joined(
-        &'q mut self,
-        target: (Entity, usize),
-        storage: &'r mut StorageWorldQuery<R>,
+        &'j mut self,
+        (target, index): (Entity, usize),
+        storage: &'j mut StorageWorldQuery<R>,
     ) -> Self::Out {
         (
-            &storage.storage.values[target.1],
-            (**self).get_mut(target.0).unwrap(),
+            &storage.storage.values[index],
+            (**self).get_mut(target).unwrap(),
         )
     }
 }
 
-impl<'q, 'r, 'w, 's, Q, F, R> Join<'q, 'r, (Entity, usize), StorageWorldQueryMut<R>>
-    for &'q mut Query<'w, 's, Q, F>
+impl<'j, Q, F, R> Join<'j, StorageWorldQueryMut<R>> for &'_ mut Query<'_, '_, Q, F>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
     R: Relation,
 {
-    type Out = (&'r R, <Q as WorldQuery>::Item<'q>);
+    type Out = (&'j R, <Q as WorldQuery>::Item<'j>);
 
-    fn matches(&self, target: &(Entity, usize)) -> bool {
-        (**self).get(target.0).is_ok()
+    fn matches(&self, target: Entity) -> bool {
+        (**self).get(target).is_ok()
     }
 
     fn joined(
-        &'q mut self,
-        target: (Entity, usize),
-        storage: &'r mut StorageWorldQueryMut<R>,
+        &'j mut self,
+        (target, index): (Entity, usize),
+        storage: &'j mut StorageWorldQueryMut<R>,
     ) -> Self::Out {
         (
-            &mut storage.storage.values[target.1],
-            (**self).get_mut(target.0).unwrap(),
+            &mut storage.storage.values[index],
+            (**self).get_mut(target).unwrap(),
         )
     }
 }
 
-pub trait DeclarativeJoin<R, Item> {
-    type JoinOut<T: Relation>;
-    fn join<T: Relation>(self, item: Item) -> Self::JoinOut<T>;
+pub trait DeclarativeJoin<R, Joins, Filters, Item, const POS: usize>
+where
+    R: RelationQuerySet,
+    Item: Joinable,
+{
+    type Joined<T: Relation>
+    where
+        Joins: TypedSet<R::Types, T, POS>,
+        Filters: TypedSet<R::Types, T, POS>;
+
+    type TotalJoined<T: Relation>
+    where
+        Joins: TypedSet<R::Types, T, POS>,
+        Filters: TypedSet<R::Types, T, POS>;
+
+    fn join<T: Relation>(self, item: Item) -> Self::Joined<T>
+    where
+        Joins: TypedSet<R::Types, T, POS>,
+        Filters: TypedSet<R::Types, T, POS>;
+
+    fn total_join<T: Relation>(self, item: Item) -> Self::TotalJoined<T>
+    where
+        Joins: TypedSet<R::Types, T, POS>,
+        Filters: TypedSet<R::Types, T, POS>;
 }
 
-impl<'q, 'w, 's, Q, R, F, Traversal, Extractions, StorageFiltereds, Joins, Item>
-    DeclarativeJoin<R, Item>
-    for Ops<
-        &'q Query<'w, 's, (Q, Relations<R>), F>,
-        Traversal,
-        Extractions,
-        StorageFiltereds,
-        Joins,
-    >
+impl<'o, 'w, 's, Q, R, F, Joins, Filters, Traversal, Item, const POS: usize>
+    DeclarativeJoin<R, Joins, Filters, Item, POS>
+    for Ops<&'o Query<'w, 's, (Q, Relations<R>), F>, Joins, Filters, Traversal>
 where
-    Extractions: Append,
-    StorageFiltereds: Append,
-    Joins: Append,
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
     R: RelationQuerySet,
+    Item: Joinable,
 {
-    type JoinOut<T: Relation> = Ops<
-        &'q Query<'w, 's, (Q, Relations<R>), F>,
-        Traversal,
-        <Extractions as Append>::Out<T>,
-        <StorageFiltereds as Append>::Out<Drop>,
-        <Joins as Append>::Out<Item>,
-    >;
-
-    fn join<T: Relation>(self, item: Item) -> Self::JoinOut<T> {
-        Ops {
-            query: self.query,
-            traversal: PhantomData,
-            extractions: PhantomData,
-            storage_filters: self.storage_filters.append(Drop),
-            joins: self.joins.append(item),
-        }
-    }
-}
-
-impl<'q, 'w, 's, Q, R, F, Traversal, Extractions, StorageFiltereds, Joins, Item>
-    DeclarativeJoin<R, Item>
-    for Ops<
-        &'q mut Query<'w, 's, (Q, Relations<R>), F>,
-        Traversal,
-        Extractions,
-        StorageFiltereds,
-        Joins,
+    type Joined<T: Relation> = Ops<
+        &'o Query<'w, 's, (Q, Relations<R>), F>,
+        <Joins as TypedSet<R::Types, T, POS>>::Out<Item>,
+        <Filters as TypedSet<R::Types, T, POS>>::Out<Drop>,
+        Traversal
     >
-where
-    Extractions: Append,
-    StorageFiltereds: Append,
-    Joins: Append,
-    Q: 'static + WorldQuery,
-    F: 'static + ReadOnlyWorldQuery,
-    R: RelationQuerySet,
-{
-    type JoinOut<T: Relation> = Ops<
-        &'q mut Query<'w, 's, (Q, Relations<R>), F>,
-        Traversal,
-        <Extractions as Append>::Out<T>,
-        <StorageFiltereds as Append>::Out<Drop>,
-        <Joins as Append>::Out<Item>,
-    >;
-
-    fn join<T: Relation>(self, item: Item) -> Self::JoinOut<T> {
-        Ops {
-            query: self.query,
-            traversal: PhantomData,
-            extractions: PhantomData,
-            storage_filters: self.storage_filters.append(Drop),
-            joins: self.joins.append(item),
-        }
-    }
-}
-
-/*impl<'j, 'o, 'w, 's, Q, F, R, Joins, Item, Traversal, Path, const POS: usize>
-    DeclarativeJoin<'j, R, Joins, Item, POS>
-    for Ops<&'o Query<'w, 's, (Q, Relations<R>), F>, Joins, Traversal, Path>
-where
-    Q: 'static + WorldQuery,
-    F: 'static + ReadOnlyWorldQuery,
-    R: RelationSet + Send + Sync,
-{
-    type Out<T> = Ops<&'o Query<'w, 's, (Q, Relations<R>), F>, Joins::Out<Item>, Traversal, Path>
     where
         Joins: TypedSet<R::Types, T, POS>,
-        T: 'j;
+        Filters: TypedSet<R::Types, T, POS>;
 
-    fn join<T>(self, item: Item) -> Self::Out<T>
+    type TotalJoined<T: Relation> = Ops<
+        &'o Query<'w, 's, (Q, Relations<R>), F>,
+        <Joins as TypedSet<R::Types, T, POS>>::Out<Item>,
+        <Filters as TypedSet<R::Types, T, POS>>::Out<Keep>,
+        Traversal
+    >
     where
-        T: Relation + 'j,
         Joins: TypedSet<R::Types, T, POS>,
-        Joins::Out<Item>: Joined<'j, R::WorldQuery>,
+        Filters: TypedSet<R::Types, T, POS>;
+
+    fn join<T: Relation>(self, item: Item) -> Self::Joined<T>
+    where
+        Joins: TypedSet<R::Types, T, POS>,
+        Filters: TypedSet<R::Types, T, POS>,
     {
         Ops {
             query: self.query,
             joins: self.joins.set(item),
-            traversal: self.traversal,
-            queue: self.queue,
+            filters: self.filters.set(Drop),
+            traversal: PhantomData,
         }
     }
-}
 
-impl<'j, 'o, 'w, 's, Q, F, R, Joins, Item, Traversal, Path, const POS: usize>
-    DeclarativeJoin<'j, R, Joins, Item, POS>
-    for Ops<&'o mut Query<'w, 's, (Q, Relations<R>), F>, Joins, Traversal, Path>
-where
-    Q: 'static + WorldQuery,
-    F: 'static + ReadOnlyWorldQuery,
-    R: RelationSet + Send + Sync,
-{
-    type Out<T> = Ops<&'o mut Query<'w, 's, (Q, Relations<R>), F>, Joins::Out<Item>, Traversal, Path>
+    fn total_join<T: Relation>(self, item: Item) -> Self::TotalJoined<T>
     where
         Joins: TypedSet<R::Types, T, POS>,
-        T: 'j;
-
-    fn join<T>(self, item: Item) -> Self::Out<T>
-    where
-        T: Relation + 'j,
-        Joins: TypedSet<R::Types, T, POS>,
-        Joins::Out<Item>: Joined<'j, R::WorldQuery>,
+        Filters: TypedSet<R::Types, T, POS>,
     {
         Ops {
             query: self.query,
             joins: self.joins.set(item),
-            traversal: self.traversal,
-            queue: self.queue,
+            filters: self.filters.set(Keep),
+            traversal: PhantomData,
         }
     }
 }
 
-impl<'o, 'w, 's, Q, F, R, Joins> LendingForEach
-    for Ops<&'o Query<'w, 's, (Q, Relations<R>), F>, Joins>
-where
-    Q: 'static + WorldQuery,
-    F: 'static + ReadOnlyWorldQuery,
-    R: RelationSet + Send + Sync,
-    for<'e, 'j> Joins: Joined<'j, FetchItem<'e, R>>,
-{
-    type In<'e, 'j> = (
-        <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'e>,
-        <Joins as Joined<'j, FetchItem<'e, R>>>::Out,
-    );
-
-    fn for_each(mut self, mut func: impl FnMut(Self::In<'_, '_>)) {
-        for (q, r) in self.query.iter() {
-            func((q, self.joins.joined(r.world_query)))
-        }
-    }
-}
-impl<'o, 'w, 's, Q, F, R, Joins> LendingForEach
-    for Ops<&'o mut Query<'w, 's, (Q, Relations<R>), F>, Joins>
-where
-    Q: 'static + WorldQuery,
-    F: 'static + ReadOnlyWorldQuery,
-    R: RelationSet + Send + Sync,
-    for<'e, 'j> Joins: Joined<'j, FetchItemMut<'e, R>>,
-{
-    type In<'e, 'j> = (
-        <Q as WorldQuery>::Item<'e>,
-        <Joins as Joined<'j, FetchItemMut<'e, R>>>::Out,
-    );
-
-    fn for_each(mut self, mut func: impl FnMut(Self::In<'_, '_>)) {
-        for (q, r) in self.query.iter_mut() {
-            func((q, self.joins.joined(r.world_query)))
-        }
-    }
-}
-
-impl<T> LendingForEach for Option<T>
-where
-    T: LendingForEach,
-{
-    type In<'e, 'j> = T::In<'e, 'j>;
-
-    fn for_each(self, func: impl FnMut(Self::In<'_, '_>)) {
-        if let Some(t) = self {
-            t.for_each(func)
-        }
-    }
-}
-
-#[cfg(test)]
+/*#[cfg(test)]
 #[allow(dead_code)]
 #[allow(unused_variables)]
 mod compile_tests {
