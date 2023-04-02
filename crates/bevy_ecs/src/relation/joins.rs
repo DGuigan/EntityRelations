@@ -71,7 +71,7 @@ where
     type In<'a> = <J0 as Join<'a, S0>>::Out;
     fn for_each<F, R>(self, mut func: F)
     where
-        R: IntoControlFlow,
+        R: Into<ControlFlow>,
         F: FnMut(Self::In<'_>) -> R,
     {
         let ((items0,), (mut storage0,), (mut joins0,)) = self;
@@ -79,7 +79,7 @@ where
             if !joins0.matches(i0.0) {
                 continue;
             }
-            if let ControlFlow::Exit = func(joins0.joined(i0, &mut storage0)).into_control_flow() {
+            if let ControlFlow::Exit = func(joins0.joined(i0, &mut storage0)).into() {
                 return;
             }
         }
@@ -96,7 +96,7 @@ where
     type In<'a> = (<J0 as Join<'a, S0>>::Out, <J1 as Join<'a, S1>>::Out);
     fn for_each<F, R>(self, mut func: F)
     where
-        R: IntoControlFlow,
+        R: Into<ControlFlow>,
         F: FnMut(Self::In<'_>) -> R,
     {
         let ((items0, items1), (mut storage0, mut storage1), (mut joins0, mut joins1)) = self;
@@ -112,7 +112,7 @@ where
                     joins0.joined(i0, &mut storage0),
                     joins1.joined(i1, &mut storage1),
                 ))
-                .into_control_flow()
+                .into()
                 {
                     return;
                 }
@@ -138,7 +138,7 @@ where
     );
     fn for_each<F, R>(self, mut func: F)
     where
-        R: IntoControlFlow,
+        R: Into<ControlFlow>,
         F: FnMut(Self::In<'_>) -> R,
     {
         let (
@@ -163,7 +163,7 @@ where
                         joins1.joined(i1, &mut storage1),
                         joins2.joined(i2, &mut storage2),
                     ))
-                    .into_control_flow()
+                    .into()
                     {
                         return;
                     }
@@ -383,6 +383,25 @@ where
             filters: self.filters.set(Keep),
             traversal: PhantomData,
         }
+    }
+}
+
+impl<Q, R, F, Joins, Filters> ForEachPermutations
+    for Ops<&'_ Query<'_, '_, (Q, Relations<R>), F>, Joins, Filters>
+where
+    Q: 'static + WorldQuery,
+    F: 'static + ReadOnlyWorldQuery,
+    R: RelationQuerySet,
+    R::WorldQuery: Filtered<Filters>,
+    <R::WorldQuery as Filtered<Filters>>::Out: Flatten<()>,
+{
+    type In<'a> = u8;
+    fn for_each<Func, Ret>(self, func: Func)
+    where
+        Ret: Into<ControlFlow>,
+        Func: FnMut(Self::In<'_>) -> Ret,
+    {
+        todo!()
     }
 }
 

@@ -24,8 +24,6 @@ pub use tuple_traits::*;
 mod sealed {
     use super::*;
     pub trait Sealed {}
-    impl Sealed for ControlFlow {}
-    impl Sealed for () {}
     impl<'a, T: Relation> Sealed for &'a T {}
     impl<'a, T: Relation> Sealed for &'a mut T {}
     impl<T: RelationQuerySet> Sealed for Option<T> {}
@@ -51,19 +49,9 @@ impl<R: Relation> Component for Storage<R> {
 }
 
 #[derive(Component)]
-pub(crate) struct Edges {
+pub struct Edges {
     pub(crate) targets: [HashMap<TypeId, HashMap<Entity, usize>>; 4],
     pub(crate) fosters: HashMap<TypeId, Entity>,
-}
-
-impl Edges {
-    fn target_iter<R: Relation>(&self) -> impl '_ + Clone + Iterator<Item = (Entity, usize)> {
-        self.targets[R::DESPAWN_POLICY as usize]
-            .get(&TypeId::of::<Storage<R>>())
-            .map(|map| map.iter().map(|(e, i)| (*e, *i)))
-            .into_iter()
-            .flatten()
-    }
 }
 
 // Precedence: Most data latering operation is preferred.
@@ -98,7 +86,7 @@ pub struct EdgesWorldQuery {
 }
 
 pub trait RelationQuerySet: Sealed + Send + Sync {
-    type Types;
+    type Types: EdgeIters;
     type WorldQuery: WorldQuery;
     type ColsWith<T: Default>: Default;
 }
@@ -116,7 +104,7 @@ impl<R: Relation> RelationQuerySet for &'_ mut R {
 }
 
 impl<R: RelationQuerySet> RelationQuerySet for Option<R> {
-    type Types = R;
+    type Types = R::Types;
     type WorldQuery = Option<R::WorldQuery>;
     type ColsWith<T: Default> = R::ColsWith<T>;
 }
@@ -134,7 +122,7 @@ impl<P0: RelationQuerySet> RelationQuerySet for (P0,) {
 #[derive(WorldQuery)]
 #[world_query(mutable)]
 pub struct Relations<T: RelationQuerySet> {
-    register: &'static Edges,
+    edges: &'static Edges,
     world_query: T::WorldQuery,
     #[world_query(ignore)]
     _phantom: PhantomData<T>,
@@ -177,23 +165,13 @@ where
 pub(crate) type FetchItemMut<'a, R> = <<R as RelationSet>::WorldQuery as WorldQuery>::Item<'a>;*/
 
 pub enum ControlFlow {
-    Exit,
     Continue,
+    Exit,
 }
 
-pub trait IntoControlFlow: Sealed {
-    fn into_control_flow(self) -> ControlFlow;
-}
-
-impl IntoControlFlow for () {
-    fn into_control_flow(self) -> ControlFlow {
+impl From<()> for ControlFlow {
+    fn from(_: ()) -> Self {
         ControlFlow::Continue
-    }
-}
-
-impl IntoControlFlow for ControlFlow {
-    fn into_control_flow(self) -> ControlFlow {
-        self
     }
 }
 
@@ -201,6 +179,6 @@ pub trait ForEachPermutations {
     type In<'a>;
     fn for_each<F, R>(self, func: F)
     where
-        R: IntoControlFlow,
+        R: Into<ControlFlow>,
         F: FnMut(Self::In<'_>) -> R;
 }
