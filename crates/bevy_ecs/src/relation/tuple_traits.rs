@@ -184,7 +184,80 @@ impl<P0, P1, P2, P3> Append for (P0, P1, P2, P3) {
     }
 }
 
+#[derive(Default)]
+pub struct Drop;
+
+#[derive(Default)]
+pub struct Wipe;
+
+#[derive(Default)]
+pub struct Waive;
+
+pub trait Comb<Items> {
+    type Out;
+    fn comb(items: Items) -> Self::Out;
+}
+
+impl<Item> Comb<Item> for Drop {
+    type Out = ();
+    fn comb(_: Item) -> Self::Out {}
+}
+
+#[derive(Default)]
+pub struct Wiped;
+
+impl<Item> Comb<Item> for Wipe {
+    type Out = Wiped;
+    fn comb(_: Item) -> Self::Out {
+        Wiped
+    }
+}
+
+impl<Item> Comb<Item> for Waive {
+    type Out = Item;
+    fn comb(item: Item) -> Self::Out {
+        item
+    }
+}
+
+impl<I0, P0> Comb<(I0,)> for (P0,)
+where
+    P0: Comb<I0>,
+{
+    type Out = (P0::Out,);
+    fn comb((i0,): (I0,)) -> Self::Out {
+        (P0::comb(i0),)
+    }
+}
+
+impl<I0, I1, P0, P1> Comb<(I0, I1)> for (P0, P1)
+where
+    P0: Comb<I0>,
+    P1: Comb<I1>,
+{
+    type Out = (P0::Out, P1::Out);
+    fn comb((i0, i1): (I0, I1)) -> Self::Out {
+        (P0::comb(i0), P1::comb(i1))
+    }
+}
+
+impl<I0, I1, I2, P0, P1, P2> Comb<(I0, I1, I2)> for (P0, P1, P2)
+where
+    P0: Comb<I0>,
+    P1: Comb<I1>,
+    P2: Comb<I2>,
+{
+    type Out = (P0::Out, P1::Out, P2::Out);
+    fn comb((i0, i1, i2): (I0, I1, I2)) -> Self::Out {
+        (P0::comb(i0), P1::comb(i1), P2::comb(i2))
+    }
+}
+
 trait NoFlatten {}
+
+impl NoFlatten for Wiped {}
+impl<T> NoFlatten for &'_ T {}
+impl<T> NoFlatten for &'_ mut T {}
 
 pub trait Flatten<Flattened: Append> {
     type Out: Append;

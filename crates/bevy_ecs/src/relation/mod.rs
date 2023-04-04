@@ -51,7 +51,7 @@ impl<R: Relation> Component for Storage<R> {
 #[derive(Component)]
 pub struct Edges {
     pub(crate) targets: [HashMap<TypeId, HashMap<Entity, usize>>; 4],
-    pub(crate) fosters: HashMap<TypeId, Entity>,
+    pub(crate) fosters: HashMap<TypeId, HashSet<Entity>>,
 }
 
 // Precedence: Most data latering operation is preferred.
@@ -128,10 +128,11 @@ pub struct Relations<T: RelationQuerySet> {
     _phantom: PhantomData<T>,
 }
 
-pub struct Ops<Query, Joins, Filters, Traversal = ()> {
+pub struct Ops<Query, Joins, EdgeComb, StorageComb, Traversal = ()> {
     query: Query,
     joins: Joins,
-    filters: Filters,
+    edge_comb: PhantomData<EdgeComb>,
+    storage_comb: PhantomData<StorageComb>,
     traversal: PhantomData<Traversal>,
 }
 
@@ -141,20 +142,22 @@ where
     F: 'static + ReadOnlyWorldQuery,
     R: RelationQuerySet + Send + Sync,
 {
-    fn ops(&self) -> Ops<&Self, R::ColsWith<()>, R::ColsWith<Drop>> {
+    fn ops(&self) -> Ops<&Self, R::ColsWith<()>, R::ColsWith<Drop>, R::ColsWith<Drop>> {
         Ops {
             query: self,
             joins: R::ColsWith::<()>::default(),
-            filters: R::ColsWith::<Drop>::default(),
+            edge_comb: PhantomData,
+            storage_comb: PhantomData,
             traversal: PhantomData,
         }
     }
 
-    fn ops_mut(&mut self) -> Ops<&mut Self, R::ColsWith<()>, R::ColsWith<Drop>> {
+    fn ops_mut(&mut self) -> Ops<&mut Self, R::ColsWith<()>, R::ColsWith<Drop>, R::ColsWith<Drop>> {
         Ops {
             query: self,
             joins: R::ColsWith::<()>::default(),
-            filters: R::ColsWith::<Drop>::default(),
+            edge_comb: PhantomData,
+            storage_comb: PhantomData,
             traversal: PhantomData,
         }
     }
@@ -176,9 +179,10 @@ impl From<()> for ControlFlow {
 }
 
 pub trait ForEachPermutations {
-    type In<'a>;
-    fn for_each<F, R>(self, func: F)
+    type Components<'a>;
+    type Joins<'a>;
+    fn for_each<Func, Ret>(self, func: Func)
     where
-        R: Into<ControlFlow>,
-        F: FnMut(Self::In<'_>) -> R;
+        Ret: Into<ControlFlow>,
+        Func: for<'a> FnMut(/*&mut Self::Components<'_>,*/ Self::Joins<'a>) -> Ret;
 }

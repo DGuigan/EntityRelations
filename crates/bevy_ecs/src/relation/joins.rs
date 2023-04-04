@@ -10,37 +10,6 @@ use super::{tuple_traits::*, *};
 // O _ _: Left Join
 // O S _: Full left Join
 
-#[derive(Default)]
-pub struct Drop;
-pub struct Keep;
-
-trait Filtered<Filtereds> {
-    type Out;
-    fn filtered(self) -> Self::Out;
-}
-
-impl<T> Filtered<Keep> for T {
-    type Out = T;
-    fn filtered(self) -> Self::Out {
-        self
-    }
-}
-
-impl<T> Filtered<Drop> for T {
-    type Out = ();
-    fn filtered(self) -> Self::Out {}
-}
-
-impl<P0, F0> Filtered<(F0,)> for (P0,)
-where
-    P0: Filtered<F0>,
-{
-    type Out = (P0::Out,);
-    fn filtered(self) -> Self::Out {
-        (self.0.filtered(),)
-    }
-}
-
 pub trait Joinable {}
 
 impl<Q, F> Joinable for &'_ Query<'_, '_, Q, F>
@@ -63,117 +32,7 @@ pub trait Join<'j, Storage> {
     fn joined(&'j mut self, target_info: (Entity, usize), storage: &'j mut Storage) -> Self::Out;
 }
 
-impl<I0, S0, J0> ForEachPermutations for ((I0,), (S0,), (J0,))
-where
-    I0: Iterator<Item = (Entity, usize)>,
-    J0: for<'j> Join<'j, S0>,
-{
-    type In<'a> = <J0 as Join<'a, S0>>::Out;
-    fn for_each<F, R>(self, mut func: F)
-    where
-        R: Into<ControlFlow>,
-        F: FnMut(Self::In<'_>) -> R,
-    {
-        let ((items0,), (mut storage0,), (mut joins0,)) = self;
-        for i0 in items0 {
-            if !joins0.matches(i0.0) {
-                continue;
-            }
-            if let ControlFlow::Exit = func(joins0.joined(i0, &mut storage0)).into() {
-                return;
-            }
-        }
-    }
-}
-
-impl<I0, I1, S0, S1, J0, J1> ForEachPermutations for ((I0, I1), (S0, S1), (J0, J1))
-where
-    I0: Clone + Iterator<Item = (Entity, usize)>,
-    I1: Clone + Iterator<Item = (Entity, usize)>,
-    J0: for<'j> Join<'j, S0>,
-    J1: for<'j> Join<'j, S1>,
-{
-    type In<'a> = (<J0 as Join<'a, S0>>::Out, <J1 as Join<'a, S1>>::Out);
-    fn for_each<F, R>(self, mut func: F)
-    where
-        R: Into<ControlFlow>,
-        F: FnMut(Self::In<'_>) -> R,
-    {
-        let ((items0, items1), (mut storage0, mut storage1), (mut joins0, mut joins1)) = self;
-        for i0 in items0 {
-            if !joins0.matches(i0.0) {
-                continue;
-            }
-            for i1 in items1.clone() {
-                if !joins1.matches(i1.0) {
-                    continue;
-                }
-                if let ControlFlow::Exit = func((
-                    joins0.joined(i0, &mut storage0),
-                    joins1.joined(i1, &mut storage1),
-                ))
-                .into()
-                {
-                    return;
-                }
-            }
-        }
-    }
-}
-
-impl<I0, I1, I2, S0, S1, S2, J0, J1, J2> ForEachPermutations
-    for ((I0, I1, I2), (S0, S1, S2), (J0, J1, J2))
-where
-    I0: Clone + Iterator<Item = (Entity, usize)>,
-    I1: Clone + Iterator<Item = (Entity, usize)>,
-    I2: Clone + Iterator<Item = (Entity, usize)>,
-    J0: for<'j> Join<'j, S0>,
-    J1: for<'j> Join<'j, S1>,
-    J2: for<'j> Join<'j, S2>,
-{
-    type In<'a> = (
-        <J0 as Join<'a, S0>>::Out,
-        <J1 as Join<'a, S1>>::Out,
-        <J2 as Join<'a, S2>>::Out,
-    );
-    fn for_each<F, R>(self, mut func: F)
-    where
-        R: Into<ControlFlow>,
-        F: FnMut(Self::In<'_>) -> R,
-    {
-        let (
-            (items0, items1, items2),
-            (mut storage0, mut storage1, mut storage2),
-            (mut joins0, mut joins1, mut joins2),
-        ) = self;
-        for i0 in items0 {
-            if !joins0.matches(i0.0) {
-                continue;
-            }
-            for i1 in items1.clone() {
-                if !joins1.matches(i1.0) {
-                    continue;
-                }
-                for i2 in items2.clone() {
-                    if !joins2.matches(i2.0) {
-                        continue;
-                    }
-                    if let ControlFlow::Exit = func((
-                        joins0.joined(i0, &mut storage0),
-                        joins1.joined(i1, &mut storage1),
-                        joins2.joined(i2, &mut storage2),
-                    ))
-                    .into()
-                    {
-                        return;
-                    }
-                }
-            }
-        }
-    }
-}
-
-impl<'j, Q, F> Join<'j, ()> for &'_ Query<'_, '_, Q, F>
+impl<'j, Q, F> Join<'j, Wiped> for &'_ Query<'_, '_, Q, F>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
@@ -184,7 +43,11 @@ where
         (**self).get(target).is_ok()
     }
 
-    fn joined(&'j mut self, (target, _index): (Entity, usize), _storage: &'j mut ()) -> Self::Out {
+    fn joined(
+        &'j mut self,
+        (target, _index): (Entity, usize),
+        _storage: &'j mut Wiped,
+    ) -> Self::Out {
         (**self).get(target).unwrap()
     }
 }
@@ -240,7 +103,7 @@ where
     }
 }
 
-impl<'j, Q, F> Join<'j, ()> for &'_ mut Query<'_, '_, Q, F>
+impl<'j, Q, F> Join<'j, Wiped> for &'_ mut Query<'_, '_, Q, F>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
@@ -251,7 +114,11 @@ where
         (**self).get(target).is_ok()
     }
 
-    fn joined(&'j mut self, (target, _index): (Entity, usize), _storage: &'j mut ()) -> Self::Out {
+    fn joined(
+        &'j mut self,
+        (target, _index): (Entity, usize),
+        _storage: &'j mut Wiped,
+    ) -> Self::Out {
         (**self).get_mut(target).unwrap()
     }
 }
@@ -304,7 +171,7 @@ where
     }
 }
 
-pub trait DeclarativeJoin<R, Joins, Filters, Item, const POS: usize>
+pub trait DeclarativeJoin<R, Joins, EdgeComb, StorageComb, Item, const POS: usize>
 where
     R: RelationQuerySet,
     Item: Joinable,
@@ -312,27 +179,32 @@ where
     type Joined<T: Relation>
     where
         Joins: TypedSet<R::Types, T, POS>,
-        Filters: TypedSet<R::Types, T, POS>;
+        EdgeComb: TypedSet<R::Types, T, POS>,
+        StorageComb: TypedSet<R::Types, T, POS>;
 
     type TotalJoined<T: Relation>
     where
         Joins: TypedSet<R::Types, T, POS>,
-        Filters: TypedSet<R::Types, T, POS>;
+        EdgeComb: TypedSet<R::Types, T, POS>,
+        StorageComb: TypedSet<R::Types, T, POS>;
 
     fn join<T: Relation>(self, item: Item) -> Self::Joined<T>
     where
         Joins: TypedSet<R::Types, T, POS>,
-        Filters: TypedSet<R::Types, T, POS>;
+        EdgeComb: TypedSet<R::Types, T, POS>,
+        StorageComb: TypedSet<R::Types, T, POS>;
 
     fn total_join<T: Relation>(self, item: Item) -> Self::TotalJoined<T>
     where
         Joins: TypedSet<R::Types, T, POS>,
-        Filters: TypedSet<R::Types, T, POS>;
+        EdgeComb: TypedSet<R::Types, T, POS>,
+        StorageComb: TypedSet<R::Types, T, POS>;
 }
 
-impl<'o, 'w, 's, Q, R, F, Joins, Filters, Traversal, Item, const POS: usize>
-    DeclarativeJoin<R, Joins, Filters, Item, POS>
-    for Ops<&'o Query<'w, 's, (Q, Relations<R>), F>, Joins, Filters, Traversal>
+#[rustfmt::skip]
+impl<'o, 'w, 's, Q, R, F, Joins, EdgeComb, StorageComb, Traversal, Item, const POS: usize>
+    DeclarativeJoin<R, Joins, EdgeComb, StorageComb, Item, POS>
+    for Ops<&'o Query<'w, 's, (Q, Relations<R>), F>, Joins, EdgeComb, StorageComb, Traversal>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
@@ -342,32 +214,38 @@ where
     type Joined<T: Relation> = Ops<
         &'o Query<'w, 's, (Q, Relations<R>), F>,
         <Joins as TypedSet<R::Types, T, POS>>::Out<Item>,
-        <Filters as TypedSet<R::Types, T, POS>>::Out<Drop>,
+        <EdgeComb as TypedSet<R::Types, T, POS>>::Out<Waive>,
+        <StorageComb as TypedSet<R::Types, T, POS>>::Out<Wipe>,
         Traversal
     >
     where
         Joins: TypedSet<R::Types, T, POS>,
-        Filters: TypedSet<R::Types, T, POS>;
+        EdgeComb: TypedSet<R::Types, T, POS>,
+        StorageComb: TypedSet<R::Types, T, POS>;
 
     type TotalJoined<T: Relation> = Ops<
         &'o Query<'w, 's, (Q, Relations<R>), F>,
         <Joins as TypedSet<R::Types, T, POS>>::Out<Item>,
-        <Filters as TypedSet<R::Types, T, POS>>::Out<Keep>,
+        <EdgeComb as TypedSet<R::Types, T, POS>>::Out<Waive>,
+        <StorageComb as TypedSet<R::Types, T, POS>>::Out<Waive>,
         Traversal
     >
     where
         Joins: TypedSet<R::Types, T, POS>,
-        Filters: TypedSet<R::Types, T, POS>;
+        EdgeComb: TypedSet<R::Types, T, POS>,
+        StorageComb: TypedSet<R::Types, T, POS>;
 
     fn join<T: Relation>(self, item: Item) -> Self::Joined<T>
     where
         Joins: TypedSet<R::Types, T, POS>,
-        Filters: TypedSet<R::Types, T, POS>,
+        EdgeComb: TypedSet<R::Types, T, POS>,
+        StorageComb: TypedSet<R::Types, T, POS>
     {
         Ops {
             query: self.query,
             joins: self.joins.set(item),
-            filters: self.filters.set(Drop),
+            edge_comb: PhantomData,
+            storage_comb: PhantomData,
             traversal: PhantomData,
         }
     }
@@ -375,33 +253,123 @@ where
     fn total_join<T: Relation>(self, item: Item) -> Self::TotalJoined<T>
     where
         Joins: TypedSet<R::Types, T, POS>,
-        Filters: TypedSet<R::Types, T, POS>,
+        EdgeComb: TypedSet<R::Types, T, POS>,
+        StorageComb: TypedSet<R::Types, T, POS>
     {
         Ops {
             query: self.query,
             joins: self.joins.set(item),
-            filters: self.filters.set(Keep),
+            edge_comb: PhantomData,
+            storage_comb: PhantomData,
             traversal: PhantomData,
         }
     }
 }
 
-impl<Q, R, F, Joins, Filters> ForEachPermutations
-    for Ops<&'_ Query<'_, '_, (Q, Relations<R>), F>, Joins, Filters>
+#[rustfmt::skip]
+impl<'o, 'w, 's, Q, R, F, Joins, EdgeComb, StorageComb, Traversal, Item, const POS: usize>
+    DeclarativeJoin<R, Joins, EdgeComb, StorageComb, Item, POS>
+    for Ops<&'o mut Query<'w, 's, (Q, Relations<R>), F>, Joins, EdgeComb, StorageComb, Traversal>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
     R: RelationQuerySet,
-    R::WorldQuery: Filtered<Filters>,
-    <R::WorldQuery as Filtered<Filters>>::Out: Flatten<()>,
+    Item: Joinable,
 {
-    type In<'a> = u8;
-    fn for_each<Func, Ret>(self, func: Func)
+    type Joined<T: Relation> = Ops<
+        &'o mut Query<'w, 's, (Q, Relations<R>), F>,
+        <Joins as TypedSet<R::Types, T, POS>>::Out<Item>,
+        <EdgeComb as TypedSet<R::Types, T, POS>>::Out<Waive>,
+        <StorageComb as TypedSet<R::Types, T, POS>>::Out<Wipe>,
+        Traversal
+    >
+    where
+        Joins: TypedSet<R::Types, T, POS>,
+        EdgeComb: TypedSet<R::Types, T, POS>,
+        StorageComb: TypedSet<R::Types, T, POS>;
+
+    type TotalJoined<T: Relation> = Ops<
+        &'o mut Query<'w, 's, (Q, Relations<R>), F>,
+        <Joins as TypedSet<R::Types, T, POS>>::Out<Item>,
+        <EdgeComb as TypedSet<R::Types, T, POS>>::Out<Waive>,
+        <StorageComb as TypedSet<R::Types, T, POS>>::Out<Waive>,
+        Traversal
+    >
+    where
+        Joins: TypedSet<R::Types, T, POS>,
+        EdgeComb: TypedSet<R::Types, T, POS>,
+        StorageComb: TypedSet<R::Types, T, POS>;
+
+    fn join<T: Relation>(self, item: Item) -> Self::Joined<T>
+    where
+        Joins: TypedSet<R::Types, T, POS>,
+        EdgeComb: TypedSet<R::Types, T, POS>,
+        StorageComb: TypedSet<R::Types, T, POS>
+    {
+        Ops {
+            query: self.query,
+            joins: self.joins.set(item),
+            edge_comb: PhantomData,
+            storage_comb: PhantomData,
+            traversal: PhantomData,
+        }
+    }
+
+    fn total_join<T: Relation>(self, item: Item) -> Self::TotalJoined<T>
+    where
+        Joins: TypedSet<R::Types, T, POS>,
+        EdgeComb: TypedSet<R::Types, T, POS>,
+        StorageComb: TypedSet<R::Types, T, POS>
+    {
+        Ops {
+            query: self.query,
+            joins: self.joins.set(item),
+            edge_comb: PhantomData,
+            storage_comb: PhantomData,
+            traversal: PhantomData,
+        }
+    }
+}
+
+type RelationItem<'a, R> =
+    <<<R as RelationQuerySet>::WorldQuery as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
+
+impl<E0, S0, J0, Q, R, F, Joins, EdgeComb, StorageComb> ForEachPermutations
+    for Ops<&'_ Query<'_, '_, (Q, Relations<R>), F>, Joins, EdgeComb, StorageComb>
+where
+    Q: 'static + WorldQuery,
+    F: 'static + ReadOnlyWorldQuery,
+    R: RelationQuerySet,
+    for<'a> EdgeComb: Comb<<R::Types as EdgeIters>::Out<'a>>,
+    for<'a> <EdgeComb as Comb<<R::Types as EdgeIters>::Out<'a>>>::Out: Flatten<(), Out = (E0,)>,
+    for<'a> StorageComb: Comb<RelationItem<'a, R>>,
+    for<'a> <StorageComb as Comb<RelationItem<'a, R>>>::Out: Flatten<(), Out = (S0,)>,
+    Joins: Flatten<(), Out = (J0,)>,
+    E0: Clone + Iterator<Item = (Entity, usize)>,
+    J0: for<'j> Join<'j, S0>,
+{
+    type Components<'a> = <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
+    type Joins<'a> = <J0 as Join<'a, S0>>::Out;
+
+    fn for_each<Func, Ret>(self, mut func: Func)
     where
         Ret: Into<ControlFlow>,
-        Func: FnMut(Self::In<'_>) -> Ret,
+        Func: for<'a> FnMut(/*&mut Self::Components<'_>,*/ Self::Joins<'a>) -> Ret,
     {
-        todo!()
+        let (j0,) = self.joins.flatten(());
+        for (mut componantes, relations) in self.query.iter() {
+            let (edges0,) = EdgeComb::comb(R::Types::edge_iters(&relations.edges)).flatten(());
+            let (s0,) = StorageComb::comb(relations.world_query).flatten(());
+            for e0 in edges0 {
+                if !j0.matches(e0.0) {
+                    continue;
+                }
+                if let ControlFlow::Exit = func(/*&mut componantes,*/ j0.joined(e0, &mut s0)).into()
+                {
+                    return;
+                }
+            }
+        }
     }
 }
 
