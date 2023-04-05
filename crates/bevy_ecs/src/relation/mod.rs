@@ -178,11 +178,13 @@ impl From<()> for ControlFlow {
     }
 }
 
-pub trait ForEachPermutations {
+// It is nessecary to pass the tuples back into the trait itself
+// otherwise we get mysterious HRTB errors about impls on FnOnce not being general enough
+pub trait ForEachPermutations<EdgeTup, StoreTup, JoinTup> {
     type Components<'a>;
     type Joins<'a>;
     fn for_each<Func, Ret>(self, func: Func)
     where
         Ret: Into<ControlFlow>,
-        Func: for<'a> FnMut(/*&mut Self::Components<'_>,*/ Self::Joins<'a>) -> Ret;
+        Func: FnMut(&mut Self::Components<'_>, Self::Joins<'_>) -> Ret;
 }

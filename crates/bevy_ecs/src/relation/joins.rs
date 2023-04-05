@@ -334,8 +334,9 @@ where
 type RelationItem<'a, R> =
     <<<R as RelationQuerySet>::WorldQuery as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
 
-impl<E0, S0, J0, Q, R, F, Joins, EdgeComb, StorageComb> ForEachPermutations
-    for Ops<&'_ Query<'_, '_, (Q, Relations<R>), F>, Joins, EdgeComb, StorageComb>
+impl<'o, 'w, 's, E0, S0, J0, Q, R, F, Joins, EdgeComb, StorageComb>
+    ForEachPermutations<(E0,), (S0,), (J0,)>
+    for Ops<&'o Query<'w, 's, (Q, Relations<R>), F>, Joins, EdgeComb, StorageComb>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
@@ -354,18 +355,17 @@ where
     fn for_each<Func, Ret>(self, mut func: Func)
     where
         Ret: Into<ControlFlow>,
-        Func: for<'a> FnMut(/*&mut Self::Components<'_>,*/ Self::Joins<'a>) -> Ret,
+        Func: FnMut(&mut Self::Components<'_>, Self::Joins<'_>) -> Ret,
     {
-        let (j0,) = self.joins.flatten(());
+        let (mut j0,) = self.joins.flatten(());
         for (mut componantes, relations) in self.query.iter() {
-            let (edges0,) = EdgeComb::comb(R::Types::edge_iters(&relations.edges)).flatten(());
-            let (s0,) = StorageComb::comb(relations.world_query).flatten(());
+            let (edges0,) = EdgeComb::comb(R::Types::edge_iters(relations.edges)).flatten(());
+            let (mut s0,) = StorageComb::comb(relations.world_query).flatten(());
             for e0 in edges0 {
                 if !j0.matches(e0.0) {
                     continue;
                 }
-                if let ControlFlow::Exit = func(/*&mut componantes,*/ j0.joined(e0, &mut s0)).into()
-                {
+                if let ControlFlow::Exit = func(&mut componantes, j0.joined(e0, &mut s0)).into() {
                     return;
                 }
             }
