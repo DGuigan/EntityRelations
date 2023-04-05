@@ -52,7 +52,7 @@ where
     }
 }
 
-impl<'j, Q, F, R> Join<'j, StorageWorldQuery<R>> for &'_ Query<'_, '_, Q, F>
+impl<'j, 'a, Q, F, R> Join<'j, &'a Storage<R>> for &'_ Query<'_, '_, Q, F>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
@@ -67,16 +67,13 @@ where
     fn joined(
         &'j mut self,
         (target, index): (Entity, usize),
-        storage: &'j mut StorageWorldQuery<R>,
+        storage: &'j mut &'a Storage<R>,
     ) -> Self::Out {
-        (
-            &storage.storage.values[index],
-            (**self).get(target).unwrap(),
-        )
+        (&storage.values[index], (**self).get(target).unwrap())
     }
 }
 
-impl<'j, Q, F, R> Join<'j, StorageWorldQueryMut<R>> for &'_ Query<'_, '_, Q, F>
+/*impl<'j, Q, F, R> Join<'j, StorageWorldQueryMut<R>> for &'_ Query<'_, '_, Q, F>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
@@ -101,7 +98,7 @@ where
             (**self).get(target).unwrap(),
         )
     }
-}
+}*/
 
 impl<'j, Q, F> Join<'j, Wiped> for &'_ mut Query<'_, '_, Q, F>
 where
@@ -123,7 +120,7 @@ where
     }
 }
 
-impl<'j, Q, F, R> Join<'j, StorageWorldQuery<R>> for &'_ mut Query<'_, '_, Q, F>
+impl<'j, 'a, Q, F, R> Join<'j, &'a Storage<R>> for &'_ mut Query<'_, '_, Q, F>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
@@ -138,16 +135,13 @@ where
     fn joined(
         &'j mut self,
         (target, index): (Entity, usize),
-        storage: &'j mut StorageWorldQuery<R>,
+        storage: &'j mut &'a Storage<R>,
     ) -> Self::Out {
-        (
-            &storage.storage.values[index],
-            (**self).get_mut(target).unwrap(),
-        )
+        (&storage.values[index], (**self).get_mut(target).unwrap())
     }
 }
 
-impl<'j, Q, F, R> Join<'j, StorageWorldQueryMut<R>> for &'_ mut Query<'_, '_, Q, F>
+/*impl<'j, Q, F, R> Join<'j, StorageWorldQueryMut<R>> for &'_ mut Query<'_, '_, Q, F>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
@@ -169,7 +163,7 @@ where
             (**self).get_mut(target).unwrap(),
         )
     }
-}
+}*/
 
 pub trait DeclarativeJoin<R, Joins, EdgeComb, StorageComb, Item, const POS: usize>
 where
@@ -334,38 +328,37 @@ where
 type RelationItem<'a, R> =
     <<<R as RelationQuerySet>::WorldQuery as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
 
-impl<'o, 'w, 's, E0, S0, J0, Q, R, F, Joins, EdgeComb, StorageComb>
-    ForEachPermutations<(E0,), (S0,), (J0,)>
-    for Ops<&'o Query<'w, 's, (Q, Relations<R>), F>, Joins, EdgeComb, StorageComb>
+impl<E0, S0, J0, Q, R, F, Joins, EdgeComb, StorageComb> ForEachPermutations<(E0,), (S0,), (J0,)>
+    for Ops<&'_ Query<'_, '_, (Q, Relations<R>), F>, Joins, EdgeComb, StorageComb>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
     R: RelationQuerySet,
-    for<'a> EdgeComb: Comb<<R::Types as EdgeIters>::Out<'a>>,
-    for<'a> <EdgeComb as Comb<<R::Types as EdgeIters>::Out<'a>>>::Out: Flatten<(), Out = (E0,)>,
+    EdgeComb: Comb<R::Types>,
+    <EdgeComb as Comb<R::Types>>::Out: Flatten<(), Out = (E0,)>,
     for<'a> StorageComb: Comb<RelationItem<'a, R>>,
     for<'a> <StorageComb as Comb<RelationItem<'a, R>>>::Out: Flatten<(), Out = (S0,)>,
     Joins: Flatten<(), Out = (J0,)>,
-    E0: Clone + Iterator<Item = (Entity, usize)>,
+    E0: Relation,
     J0: for<'j> Join<'j, S0>,
 {
-    type Components<'a> = <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
+    //type Components<'a> = <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
     type Joins<'a> = <J0 as Join<'a, S0>>::Out;
 
-    fn for_each<Func, Ret>(self, mut func: Func)
+    fn for_each_permutations<Func, Ret>(self, mut func: Func)
     where
         Ret: Into<ControlFlow>,
-        Func: FnMut(&mut Self::Components<'_>, Self::Joins<'_>) -> Ret,
+        Func: for<'a> FnMut(/*&'a mut Self::Components<'b>,*/ Self::Joins<'a>) -> Ret,
     {
         let (mut j0,) = self.joins.flatten(());
         for (mut componantes, relations) in self.query.iter() {
-            let (edges0,) = EdgeComb::comb(R::Types::edge_iters(relations.edges)).flatten(());
             let (mut s0,) = StorageComb::comb(relations.world_query).flatten(());
-            for e0 in edges0 {
+            for e0 in relations.edges.iter::<E0>() {
                 if !j0.matches(e0.0) {
                     continue;
                 }
-                if let ControlFlow::Exit = func(&mut componantes, j0.joined(e0, &mut s0)).into() {
+                if let ControlFlow::Exit = func(/*&mut componantes,*/ j0.joined(e0, &mut s0)).into()
+                {
                     return;
                 }
             }
@@ -373,11 +366,64 @@ where
     }
 }
 
-/*#[cfg(test)]
+/*impl<E0, E1, S0, S1, J0, J1, Q, R, F, Joins, EdgeComb, StorageComb>
+    ForEachPermutations<(E0, E1), (S0, S1), (J0, J1)>
+    for Ops<&'_ Query<'_, '_, (Q, Relations<R>), F>, Joins, EdgeComb, StorageComb>
+where
+    Q: 'static + WorldQuery,
+    F: 'static + ReadOnlyWorldQuery,
+    R: RelationQuerySet,
+    for<'a> EdgeComb: Comb<<R::Types as EdgeIters>::Out<'a>>,
+    for<'a> <EdgeComb as Comb<<R::Types as EdgeIters>::Out<'a>>>::Out: Flatten<(), Out = (E0, E1)>,
+    for<'a> StorageComb: Comb<RelationItem<'a, R>>,
+    for<'a> <StorageComb as Comb<RelationItem<'a, R>>>::Out: Flatten<(), Out = (S0, S1)>,
+    Joins: Flatten<(), Out = (J0, J1)>,
+    E0: Clone + Iterator<Item = (Entity, usize)>,
+    E1: Clone + Iterator<Item = (Entity, usize)>,
+    J0: for<'j> Join<'j, S0>,
+    J1: for<'j> Join<'j, S1>,
+{
+    type Components<'a> = <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
+    type Joins<'a> = (<J0 as Join<'a, S0>>::Out, <J1 as Join<'a, S1>>::Out);
+
+    fn for_each_permutations<Func, Ret>(self, mut func: Func)
+    where
+        Ret: Into<ControlFlow>,
+        Func: FnMut(&mut Self::Components<'_>, Self::Joins<'_>) -> Ret,
+    {
+        let (mut j0, mut j1) = self.joins.flatten(());
+        for (mut componantes, relations) in self.query.iter() {
+            let (edges0, edges1) =
+                EdgeComb::comb(R::Types::edge_iters(relations.edges)).flatten(());
+            let (mut s0, mut s1) = StorageComb::comb(relations.world_query).flatten(());
+            for e0 in edges0 {
+                if !j0.matches(e0.0) {
+                    continue;
+                }
+                for e1 in edges1.clone() {
+                    if !j1.matches(e1.0) {
+                        continue;
+                    }
+                    if let ControlFlow::Exit = func(
+                        &mut componantes,
+                        (j0.joined(e0, &mut s0), j1.joined(e1, &mut s1)),
+                    )
+                    .into()
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}*/
+
+#[cfg(test)]
 #[allow(dead_code)]
 #[allow(unused_variables)]
 mod compile_tests {
     use super::*;
+    use crate::relation::ForEachPermutations;
     use crate::{component::TableStorage, prelude::*};
 
     #[derive(Component)]
@@ -387,7 +433,6 @@ mod compile_tests {
     struct B;
 
     impl Relation for B {
-        type Arity = Exclusive<Self>;
         type Storage = TableStorage;
     }
 
@@ -395,7 +440,6 @@ mod compile_tests {
     struct C;
 
     impl Relation for C {
-        type Arity = Multi<Self>;
         type Storage = TableStorage;
     }
 
@@ -405,14 +449,11 @@ mod compile_tests {
     #[derive(Component)]
     struct E;
 
-    fn join_immut(rq: Query<(&A, Relations<(&C, &B)>)>, d: Query<&D>, e: Query<&E>) {
-        rq.ops()
-            .join::<B>(&e)
-            .join::<C>(&d)
-            .for_each(|(_, (cd, be))| cd.for_each(|_| {}));
+    fn join_immut(rq: Query<(&A, Relations<&B>)>, d: Query<&D>, e: Query<&E>) {
+        rq.ops().join::<B>(&e).for_each_permutations(|_| {});
     }
 
-    fn join_left_mut(mut rq: Query<(&A, Relations<(&mut C, &mut B)>)>, d: Query<&D>, e: Query<&E>) {
+    /*fn join_left_mut(mut rq: Query<(&A, Relations<(&mut C, &mut B)>)>, d: Query<&D>, e: Query<&E>) {
         rq.ops_mut()
             .join::<B>(&e)
             .join::<C>(&d)
@@ -483,10 +524,10 @@ mod compile_tests {
 
     fn generic<R: Relation>(rq: Query<(&A, Relations<&R>)>, b: Query<&B>) {
         rq.ops().join::<R>(&b).for_each(|_| {})
-    }
+    }*/
 }
 
-#[cfg(test)]
+/*#[cfg(test)]
 mod unit_tests {
     use super::*;
     use crate::{self as bevy_ecs, component::TableStorage, prelude::*};

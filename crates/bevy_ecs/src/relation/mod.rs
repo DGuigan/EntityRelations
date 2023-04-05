@@ -40,7 +40,7 @@ use sealed::*;
 // - Cleanup code can just remove entites without knowing relation type
 // - Need manual WorldQuery impl that hides this archetype access
 // - Uphold invariants to ensure soundness
-pub(crate) struct Storage<R: Relation> {
+pub struct Storage<R: Relation> {
     pub(crate) values: SmallVec<[R; 1]>,
 }
 
@@ -52,6 +52,16 @@ impl<R: Relation> Component for Storage<R> {
 pub struct Edges {
     pub(crate) targets: [HashMap<TypeId, HashMap<Entity, usize>>; 4],
     pub(crate) fosters: HashMap<TypeId, HashSet<Entity>>,
+}
+
+impl Edges {
+    fn iter<R: Relation>(&self) -> impl '_ + Iterator<Item = (Entity, usize)> {
+        self.targets[R::DESPAWN_POLICY as usize]
+            .get(&TypeId::of::<Storage<R>>())
+            .map(|map| map.iter().map(|(entity, index)| (*entity, *index)))
+            .into_iter()
+            .flatten()
+    }
 }
 
 // Precedence: Most data latering operation is preferred.
@@ -69,7 +79,7 @@ pub trait Relation: 'static + Sized + Send + Sync {
     const EXCLUSIVE: bool = false;
 }
 
-#[derive(WorldQuery)]
+/*#[derive(WorldQuery)]
 pub struct StorageWorldQuery<R: Relation> {
     storage: &'static Storage<R>,
 }
@@ -78,28 +88,23 @@ pub struct StorageWorldQuery<R: Relation> {
 #[world_query(mutable)]
 pub struct StorageWorldQueryMut<R: Relation> {
     storage: &'static mut Storage<R>,
-}
-
-#[derive(WorldQuery)]
-pub struct EdgesWorldQuery {
-    register: &'static Edges,
-}
+}*/
 
 pub trait RelationQuerySet: Sealed + Send + Sync {
-    type Types: EdgeIters;
+    type Types;
     type WorldQuery: WorldQuery;
     type ColsWith<T: Default>: Default;
 }
 
 impl<R: Relation> RelationQuerySet for &'_ R {
     type Types = R;
-    type WorldQuery = StorageWorldQuery<R>;
+    type WorldQuery = &'static Storage<R>;
     type ColsWith<T: Default> = T;
 }
 
 impl<R: Relation> RelationQuerySet for &'_ mut R {
     type Types = R;
-    type WorldQuery = StorageWorldQueryMut<R>;
+    type WorldQuery = &'static mut Storage<R>;
     type ColsWith<T: Default> = T;
 }
 
@@ -114,6 +119,12 @@ impl<P0: RelationQuerySet> RelationQuerySet for (P0,) {
     type Types = (P0::Types,);
     type WorldQuery = (P0::WorldQuery,);
     type ColsWith<T: Default> = (P0::ColsWith<T>,);
+}
+
+impl<P0: RelationQuerySet, P1: RelationQuerySet> RelationQuerySet for (P0, P1) {
+    type Types = (P0::Types, P1::Types);
+    type WorldQuery = (P0::WorldQuery, P1::WorldQuery);
+    type ColsWith<T: Default> = (P0::ColsWith<T>, P1::ColsWith<T>);
 }
 
 // TODO:
@@ -180,11 +191,11 @@ impl From<()> for ControlFlow {
 
 // It is nessecary to pass the tuples back into the trait itself
 // otherwise we get mysterious HRTB errors about impls on FnOnce not being general enough
-pub trait ForEachPermutations<EdgeTup, StoreTup, JoinTup> {
-    type Components<'a>;
+pub trait ForEachPermutations<EdgeTup, StorageTup, JoinTup> {
+    //type Components<'a>;
     type Joins<'a>;
-    fn for_each<Func, Ret>(self, func: Func)
+    fn for_each_permutations<Func, Ret>(self, func: Func)
     where
         Ret: Into<ControlFlow>,
-        Func: FnMut(&mut Self::Components<'_>, Self::Joins<'_>) -> Ret;
+        Func: for<'a> FnMut(/*&'a mut Self::Components<'b>,*/ Self::Joins<'a>) -> Ret;
 }
