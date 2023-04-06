@@ -45,6 +45,14 @@ pub struct Storage<R: Relation> {
     pub(crate) values: SmallVec<[R; 1]>,
 }
 
+impl<R: Relation> Default for Storage<R> {
+    fn default() -> Self {
+        Self {
+            values: SmallVec::default(),
+        }
+    }
+}
+
 impl<R: Relation> Component for Storage<R> {
     type Storage = R::Storage;
 }
@@ -210,22 +218,80 @@ where
     R: Relation,
 {
     fn write(self, world: &mut World) {
-        let mut foster = world
+        let Some((mut foster_edges, mut foster_storage)) = world
             .get_entity_mut(self.foster)
-            .expect("Foster dose not exist");
+            .map(|mut foster| (
+                foster.take::<Edges>().unwrap_or_default(),
+                foster.take::<Storage<R>>().unwrap_or_default()
+            ))
+        else {
+            // TODO: Logging
+            return
+        };
 
-        let mut edges = foster.take::<Edges>().unwrap_or_else(|| Edges::default());
-
-        let mut storage = foster.take::<Storage<R>>().unwrap_or_else(|| Storage::<R> {
-            values: SmallVec::new(),
-        });
-
-        if let Some(index) = edges.targets[R::DESPAWN_POLICY as usize]
+        let foster_indices = foster_edges.targets[R::DESPAWN_POLICY as usize]
             .entry(TypeId::of::<Storage<R>>())
-            .or_default()
-            .get(&self.target)
+            .or_default();
+
+        if let Some((old_target, index)) = foster_indices
+            .iter()
+            .next()
+            .map(|(target, index)| (*target, *index))
+            .filter(|(target, _)| R::EXCLUSIVE && *target != self.target)
         {
+            world
+                .get_entity_mut(old_target)
+                .expect("Dangling relations should not exist")
+                .get_mut::<Edges>()
+                .expect("Edge component should exist")
+                .fosters
+                .get_mut(&TypeId::of::<Storage<R>>())
+                .expect("Target should have relation entry")
+                .remove(&self.foster);
+
+            foster_indices.clear();
+            foster_indices.insert(self.target, index);
+            foster_storage.values[index] = self.relation;
+
+            // Do not pull out `world.get_entity .. insert(..)` outside branch.
+            // Components need to exist on entity when cleanup code is called.
+            world
+                .get_entity_mut(self.foster)
+                .unwrap()
+                .insert((foster_edges, foster_storage));
+
+            // old_target removed so call cleanup code here
         } else {
+            if let Some(index) = foster_indices.get(&self.target) {
+                foster_storage.values[*index] = self.relation;
+            } else {
+                let Some(mut target_edges) = world
+                    .get_entity_mut(self.target)
+                    .map(|mut target| target.take::<Edges>().unwrap_or_default())
+                else {
+                    // TODO: Logging
+                    return
+                };
+
+                foster_indices.insert(self.target, foster_storage.values.len());
+                foster_storage.values.push(self.relation);
+
+                target_edges
+                    .fosters
+                    .entry(TypeId::of::<Storage<R>>())
+                    .or_default()
+                    .insert(self.foster);
+
+                world
+                    .get_entity_mut(self.target)
+                    .unwrap()
+                    .insert(target_edges);
+            }
+
+            world
+                .get_entity_mut(self.foster)
+                .unwrap()
+                .insert((foster_edges, foster_storage));
         }
     }
 }
