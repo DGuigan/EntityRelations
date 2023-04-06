@@ -109,6 +109,10 @@ impl SystemExecutor for MultiThreadedExecutor {
         let sys_count = schedule.system_ids.len();
         let set_count = schedule.set_ids.len();
 
+        let (tx, rx) = async_channel::bounded(sys_count.max(1));
+
+        self.sender = tx;
+        self.receiver = rx;
         self.evaluated_sets = FixedBitSet::with_capacity(set_count);
         self.ready_systems = FixedBitSet::with_capacity(sys_count);
         self.ready_systems_copy = FixedBitSet::with_capacity(sys_count);
@@ -169,7 +173,17 @@ impl SystemExecutor for MultiThreadedExecutor {
                             .await
                             .unwrap_or_else(|error| unreachable!("{}", error));
 
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/executor/multi_threaded.rs
                         self.finish_system_and_signal_dependents(index);
+=======
+        if self.apply_final_buffers {
+            // Do one final apply buffers after all systems have completed
+            // Commands should be applied while on the scope's thread, not the executor's thread
+            apply_system_buffers(&self.unapplied_systems, systems, world.get_mut());
+            self.unapplied_systems.clear();
+            debug_assert!(self.unapplied_systems.is_clear());
+        }
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/executor/multi_threaded.rs
 
                         while let Ok(index) = self.receiver.try_recv() {
                             self.finish_system_and_signal_dependents(index);
@@ -418,10 +432,22 @@ impl MultiThreadedExecutor {
             unsafe { system.run_unsafe((), world) };
             #[cfg(feature = "trace")]
             drop(system_guard);
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/executor/multi_threaded.rs
             sender
                 .send(system_index)
                 .await
                 .unwrap_or_else(|error| unreachable!("{}", error));
+=======
+            if res.is_err() {
+                // close the channel to propagate the error to the
+                // multithreaded executor
+                sender.close();
+            } else {
+                sender
+                    .try_send(system_index)
+                    .unwrap_or_else(|error| unreachable!("{}", error));
+            }
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/executor/multi_threaded.rs
         };
 
         #[cfg(feature = "trace")]
@@ -466,10 +492,22 @@ impl MultiThreadedExecutor {
                 apply_system_buffers(&mut unapplied_systems, systems, world);
                 #[cfg(feature = "trace")]
                 drop(system_guard);
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/executor/multi_threaded.rs
                 sender
                     .send(system_index)
                     .await
                     .unwrap_or_else(|error| unreachable!("{}", error));
+=======
+                if res.is_err() {
+                    // close the channel to propagate the error to the
+                    // multithreaded executor
+                    sender.close();
+                } else {
+                    sender
+                        .try_send(system_index)
+                        .unwrap_or_else(|error| unreachable!("{}", error));
+                }
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/executor/multi_threaded.rs
             };
 
             #[cfg(feature = "trace")]
@@ -482,10 +520,22 @@ impl MultiThreadedExecutor {
                 system.run((), world);
                 #[cfg(feature = "trace")]
                 drop(system_guard);
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/executor/multi_threaded.rs
                 sender
                     .send(system_index)
                     .await
                     .unwrap_or_else(|error| unreachable!("{}", error));
+=======
+                if res.is_err() {
+                    // close the channel to propagate the error to the
+                    // multithreaded executor
+                    sender.close();
+                } else {
+                    sender
+                        .try_send(system_index)
+                        .unwrap_or_else(|error| unreachable!("{}", error));
+                }
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/executor/multi_threaded.rs
             };
 
             #[cfg(feature = "trace")]
@@ -573,3 +623,22 @@ fn evaluate_and_fold_conditions(conditions: &mut [BoxedCondition], world: &World
         })
         .fold(true, |acc, res| acc && res)
 }
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/executor/multi_threaded.rs
+=======
+
+/// New-typed [`ThreadExecutor`] [`Resource`] that is used to run systems on the main thread
+#[derive(Resource, Clone)]
+pub struct MainThreadExecutor(pub Arc<ThreadExecutor<'static>>);
+
+impl Default for MainThreadExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MainThreadExecutor {
+    pub fn new() -> Self {
+        MainThreadExecutor(TaskPool::get_thread_executor())
+    }
+}
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/executor/multi_threaded.rs

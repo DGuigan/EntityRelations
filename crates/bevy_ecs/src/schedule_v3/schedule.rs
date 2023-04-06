@@ -7,7 +7,7 @@ use bevy_utils::default;
 #[cfg(feature = "trace")]
 use bevy_utils::tracing::info_span;
 use bevy_utils::{
-    petgraph::{algo::tarjan_scc, prelude::*},
+    petgraph::{algo::TarjanScc, prelude::*},
     thiserror::Error,
     tracing::{error, info, warn},
     HashMap, HashSet,
@@ -17,9 +17,15 @@ use fixedbitset::FixedBitSet;
 
 use crate::{
     self as bevy_ecs,
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
     component::ComponentId,
     schedule_v3::*,
     system::{BoxedSystem, Resource},
+=======
+    component::{ComponentId, Components, Tick},
+    schedule::*,
+    system::{BoxedSystem, Resource, System},
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
     world::World,
 };
 
@@ -42,21 +48,38 @@ impl Schedules {
     /// If the map already had an entry for `label`, `schedule` is inserted,
     /// and the old schedule is returned. Otherwise, `None` is returned.
     pub fn insert(&mut self, label: impl ScheduleLabel, schedule: Schedule) -> Option<Schedule> {
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
         let label: Box<dyn ScheduleLabel> = Box::new(label);
         if self.inner.contains_key(&label) {
             warn!("schedule with label {:?} already exists", label);
         }
+=======
+        let label = label.dyn_clone();
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
         self.inner.insert(label, schedule)
     }
 
     /// Removes the schedule corresponding to the `label` from the map, returning it if it existed.
     pub fn remove(&mut self, label: &dyn ScheduleLabel) -> Option<Schedule> {
-        if !self.inner.contains_key(label) {
-            warn!("schedule with label {:?} not found", label);
-        }
         self.inner.remove(label)
     }
 
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
+=======
+    /// Removes the (schedule, label) pair corresponding to the `label` from the map, returning it if it existed.
+    pub fn remove_entry(
+        &mut self,
+        label: &dyn ScheduleLabel,
+    ) -> Option<(Box<dyn ScheduleLabel>, Schedule)> {
+        self.inner.remove_entry(label)
+    }
+
+    /// Does a schedule with the provided label already exist?
+    pub fn contains(&self, label: &dyn ScheduleLabel) -> bool {
+        self.inner.contains_key(label)
+    }
+
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
     /// Returns a reference to the schedule associated with `label`, if it exists.
     pub fn get(&self, label: &dyn ScheduleLabel) -> Option<&Schedule> {
         self.inner.get(label)
@@ -67,10 +90,23 @@ impl Schedules {
         self.inner.get_mut(label)
     }
 
+    /// Returns an iterator over all schedules. Iteration order is undefined.
+    pub fn iter(&self) -> impl Iterator<Item = (&dyn ScheduleLabel, &Schedule)> {
+        self.inner
+            .iter()
+            .map(|(label, schedule)| (&**label, schedule))
+    }
+    /// Returns an iterator over mutable references to all schedules. Iteration order is undefined.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&dyn ScheduleLabel, &mut Schedule)> {
+        self.inner
+            .iter_mut()
+            .map(|(label, schedule)| (&**label, schedule))
+    }
+
     /// Iterates the change ticks of all systems in all stored schedules and clamps any older than
     /// [`MAX_CHANGE_AGE`](crate::change_detection::MAX_CHANGE_AGE).
     /// This prevents overflow and thus prevents false positives.
-    pub(crate) fn check_change_ticks(&mut self, change_tick: u32) {
+    pub(crate) fn check_change_ticks(&mut self, change_tick: Tick) {
         #[cfg(feature = "trace")]
         let _all_span = info_span!("check stored schedule ticks").entered();
         // label used when trace feature is enabled
@@ -85,8 +121,51 @@ impl Schedules {
     }
 }
 
+fn make_executor(kind: ExecutorKind) -> Box<dyn SystemExecutor> {
+    match kind {
+        ExecutorKind::Simple => Box::new(SimpleExecutor::new()),
+        ExecutorKind::SingleThreaded => Box::new(SingleThreadedExecutor::new()),
+        ExecutorKind::MultiThreaded => Box::new(MultiThreadedExecutor::new()),
+    }
+}
+
 /// A collection of systems, and the metadata and executor needed to run them
 /// in a certain order under certain conditions.
+///
+/// # Example
+/// Here is an example of a `Schedule` running a "Hello world" system:
+/// ```
+/// # use bevy_ecs::prelude::*;
+/// fn hello_world() { println!("Hello world!") }
+///
+/// fn main() {
+///     let mut world = World::new();
+///     let mut schedule = Schedule::default();
+///     schedule.add_systems(hello_world);
+///
+///     schedule.run(&mut world);
+/// }
+/// ```
+///
+/// A schedule can also run several systems in an ordered way:
+/// ```
+/// # use bevy_ecs::prelude::*;
+/// fn system_one() { println!("System 1 works!") }
+/// fn system_two() { println!("System 2 works!") }
+/// fn system_three() { println!("System 3 works!") }
+///    
+/// fn main() {
+///     let mut world = World::new();
+///     let mut schedule = Schedule::default();
+///     schedule.add_systems((
+///         system_two,
+///         system_one.before(system_two),
+///         system_three.after(system_two),
+///     ));
+///
+///     schedule.run(&mut world);
+/// }
+/// ```
 pub struct Schedule {
     graph: ScheduleGraph,
     executable: SystemSchedule,
@@ -106,20 +185,21 @@ impl Schedule {
         Self {
             graph: ScheduleGraph::new(),
             executable: SystemSchedule::new(),
-            executor: Box::new(MultiThreadedExecutor::new()),
+            executor: make_executor(ExecutorKind::default()),
             executor_initialized: false,
         }
     }
 
     /// Add a system to the schedule.
-    pub fn add_system<P>(&mut self, system: impl IntoSystemConfig<P>) -> &mut Self {
-        self.graph.add_system(system);
+    #[deprecated(since = "0.11.0", note = "please use `add_systems` instead")]
+    pub fn add_system<M>(&mut self, system: impl IntoSystemConfigs<M>) -> &mut Self {
+        self.graph.add_systems_inner(system.into_configs(), false);
         self
     }
 
     /// Add a collection of systems to the schedule.
-    pub fn add_systems<P>(&mut self, systems: impl IntoSystemConfigs<P>) -> &mut Self {
-        self.graph.add_systems(systems);
+    pub fn add_systems<M>(&mut self, systems: impl IntoSystemConfigs<M>) -> &mut Self {
+        self.graph.add_systems_inner(systems.into_configs(), false);
         self
     }
 
@@ -156,11 +236,7 @@ impl Schedule {
     /// Sets the schedule's execution strategy.
     pub fn set_executor_kind(&mut self, executor: ExecutorKind) -> &mut Self {
         if executor != self.executor.kind() {
-            self.executor = match executor {
-                ExecutorKind::Simple => Box::new(SimpleExecutor::new()),
-                ExecutorKind::SingleThreaded => Box::new(SingleThreadedExecutor::new()),
-                ExecutorKind::MultiThreaded => Box::new(MultiThreadedExecutor::new()),
-            };
+            self.executor = make_executor(executor);
             self.executor_initialized = false;
         }
         self
@@ -169,15 +245,21 @@ impl Schedule {
     /// Runs all systems in this schedule on the `world`, using its current execution strategy.
     pub fn run(&mut self, world: &mut World) {
         world.check_change_ticks();
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
         self.initialize(world).unwrap();
         // TODO: label
         #[cfg(feature = "trace")]
         let _span = info_span!("schedule").entered();
+=======
+        self.initialize(world).unwrap_or_else(|e| panic!("{e}"));
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
         self.executor.run(&mut self.executable, world);
     }
 
     /// Initializes any newly-added systems and conditions, rebuilds the executable schedule,
     /// and re-initializes the executor.
+    ///
+    /// Moves all systems and run conditions out of the [`ScheduleGraph`].
     pub fn initialize(&mut self, world: &mut World) -> Result<(), ScheduleBuildError> {
         if self.graph.changed {
             self.graph.initialize(world);
@@ -194,10 +276,20 @@ impl Schedule {
         Ok(())
     }
 
+    /// Returns the [`ScheduleGraph`].
+    pub fn graph(&self) -> &ScheduleGraph {
+        &self.graph
+    }
+
+    /// Returns a mutable reference to the [`ScheduleGraph`].
+    pub fn graph_mut(&mut self) -> &mut ScheduleGraph {
+        &mut self.graph
+    }
+
     /// Iterates the change ticks of all systems in the schedule and clamps any older than
     /// [`MAX_CHANGE_AGE`](crate::change_detection::MAX_CHANGE_AGE).
     /// This prevents overflow and thus prevents false positives.
-    pub(crate) fn check_change_ticks(&mut self, change_tick: u32) {
+    pub(crate) fn check_change_ticks(&mut self, change_tick: Tick) {
         for system in &mut self.executable.systems {
             system.check_change_tick(change_tick);
         }
@@ -216,9 +308,9 @@ impl Schedule {
     }
 }
 
-/// A directed acylic graph structure.
+/// A directed acyclic graph structure.
 #[derive(Default)]
-struct Dag {
+pub struct Dag {
     /// A directed graph.
     graph: DiGraphMap<NodeId, ()>,
     /// A cached topological ordering of the graph.
@@ -232,21 +324,43 @@ impl Dag {
             topsort: Vec::new(),
         }
     }
-}
 
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
 /// A [`SystemSet`] with metadata, stored in a [`ScheduleGraph`].
 struct SystemSetNode {
     inner: BoxedSystemSet,
     /// `true` if this system set was modified with `configure_set`
     configured: bool,
+=======
+    /// The directed graph of the stored systems, connected by their ordering dependencies.
+    pub fn graph(&self) -> &DiGraphMap<NodeId, ()> {
+        &self.graph
+    }
+
+    /// A cached topological ordering of the graph.
+    ///
+    /// The order is determined by the ordering dependencies between systems.
+    pub fn cached_topsort(&self) -> &[NodeId] {
+        &self.topsort
+    }
+}
+
+/// A [`SystemSet`] with metadata, stored in a [`ScheduleGraph`].
+struct SystemSetNode {
+    inner: BoxedSystemSet,
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
 }
 
 impl SystemSetNode {
     pub fn new(set: BoxedSystemSet) -> Self {
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
         Self {
             inner: set,
             configured: false,
         }
+=======
+        Self { inner: set }
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
     }
 
     pub fn name(&self) -> String {
@@ -254,14 +368,46 @@ impl SystemSetNode {
     }
 
     pub fn is_system_type(&self) -> bool {
-        self.inner.is_system_type()
+        self.inner.system_type().is_some()
+    }
+
+    pub fn is_anonymous(&self) -> bool {
+        self.inner.is_anonymous()
+    }
+}
+
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
+/// Metadata for a [`Schedule`].
+#[derive(Default)]
+struct ScheduleGraph {
+    systems: Vec<Option<BoxedSystem>>,
+=======
+/// A [`BoxedSystem`] with metadata, stored in a [`ScheduleGraph`].
+struct SystemNode {
+    inner: Option<BoxedSystem>,
+}
+
+impl SystemNode {
+    pub fn new(system: BoxedSystem) -> Self {
+        Self {
+            inner: Some(system),
+        }
+    }
+
+    pub fn get(&self) -> Option<&BoxedSystem> {
+        self.inner.as_ref()
+    }
+
+    pub fn get_mut(&mut self) -> Option<&mut BoxedSystem> {
+        self.inner.as_mut()
     }
 }
 
 /// Metadata for a [`Schedule`].
 #[derive(Default)]
-struct ScheduleGraph {
-    systems: Vec<Option<BoxedSystem>>,
+pub struct ScheduleGraph {
+    systems: Vec<SystemNode>,
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
     system_conditions: Vec<Option<Vec<BoxedCondition>>>,
     system_sets: Vec<SystemSetNode>,
     system_set_conditions: Vec<Option<Vec<BoxedCondition>>>,
@@ -273,7 +419,11 @@ struct ScheduleGraph {
     ambiguous_with: UnGraphMap<NodeId, ()>,
     ambiguous_with_flattened: UnGraphMap<NodeId, ()>,
     ambiguous_with_all: HashSet<NodeId>,
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
     default_set: Option<BoxedSystemSet>,
+=======
+    conflicting_systems: Vec<(NodeId, NodeId, Vec<ComponentId>)>,
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
     changed: bool,
     settings: ScheduleBuildSettings,
 }
@@ -293,12 +443,17 @@ impl ScheduleGraph {
             ambiguous_with: UnGraphMap::new(),
             ambiguous_with_flattened: UnGraphMap::new(),
             ambiguous_with_all: HashSet::new(),
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
             default_set: None,
+=======
+            conflicting_systems: Vec::new(),
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
             changed: false,
             settings: default(),
         }
     }
 
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
     fn set_default_set(&mut self, set: impl SystemSet) {
         assert!(
             !set.is_system_type(),
@@ -322,15 +477,103 @@ impl ScheduleGraph {
             for system in system_iter {
                 self.add_system_inner(system).unwrap();
             }
+=======
+    /// Returns the system at the given [`NodeId`], if it exists.
+    pub fn get_system_at(&self, id: NodeId) -> Option<&dyn System<In = (), Out = ()>> {
+        if !id.is_system() {
+            return None;
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
         }
+        self.systems
+            .get(id.index())
+            .and_then(|system| system.inner.as_deref())
     }
 
-    fn add_system<P>(&mut self, system: impl IntoSystemConfig<P>) {
-        self.add_system_inner(system).unwrap();
+    /// Returns the system at the given [`NodeId`].
+    ///
+    /// Panics if it doesn't exist.
+    #[track_caller]
+    pub fn system_at(&self, id: NodeId) -> &dyn System<In = (), Out = ()> {
+        self.get_system_at(id)
+            .ok_or_else(|| format!("system with id {id:?} does not exist in this Schedule"))
+            .unwrap()
     }
 
-    fn add_system_inner<P>(
+    /// Returns the set at the given [`NodeId`], if it exists.
+    pub fn get_set_at(&self, id: NodeId) -> Option<&dyn SystemSet> {
+        if !id.is_set() {
+            return None;
+        }
+        self.system_sets.get(id.index()).map(|set| &*set.inner)
+    }
+
+    /// Returns the set at the given [`NodeId`].
+    ///
+    /// Panics if it doesn't exist.
+    #[track_caller]
+    pub fn set_at(&self, id: NodeId) -> &dyn SystemSet {
+        self.get_set_at(id)
+            .ok_or_else(|| format!("set with id {id:?} does not exist in this Schedule"))
+            .unwrap()
+    }
+
+    /// Returns an iterator over all systems in this schedule.
+    pub fn systems(
+        &self,
+    ) -> impl Iterator<Item = (NodeId, &dyn System<In = (), Out = ()>, &[BoxedCondition])> {
+        self.systems
+            .iter()
+            .zip(self.system_conditions.iter())
+            .enumerate()
+            .filter_map(|(i, (system_node, condition))| {
+                let system = system_node.inner.as_deref()?;
+                let condition = condition.as_ref()?.as_slice();
+                Some((NodeId::System(i), system, condition))
+            })
+    }
+
+    /// Returns an iterator over all system sets in this schedule.
+    pub fn system_sets(&self) -> impl Iterator<Item = (NodeId, &dyn SystemSet, &[BoxedCondition])> {
+        self.system_set_ids.iter().map(|(_, node_id)| {
+            let set_node = &self.system_sets[node_id.index()];
+            let set = &*set_node.inner;
+            let conditions = self.system_set_conditions[node_id.index()]
+                .as_deref()
+                .unwrap_or(&[]);
+            (*node_id, set, conditions)
+        })
+    }
+
+    /// Returns the [`Dag`] of the hierarchy.
+    ///
+    /// The hierarchy is a directed acyclic graph of the systems and sets,
+    /// where an edge denotes that a system or set is the child of another set.
+    pub fn hierarchy(&self) -> &Dag {
+        &self.hierarchy
+    }
+
+    /// Returns the [`Dag`] of the dependencies in the schedule.
+    ///
+    /// Nodes in this graph are systems and sets, and edges denote that
+    /// a system or set has to run before another system or set.
+    pub fn dependency(&self) -> &Dag {
+        &self.dependency
+    }
+
+    /// Returns the list of systems that conflict with each other, i.e. have ambiguities in their access.
+    ///
+    /// If the `Vec<ComponentId>` is empty, the systems conflict on [`World`] access.
+    /// Must be called after [`ScheduleGraph::build_schedule`] to be non-empty.
+    pub fn conflicting_systems(&self) -> &[(NodeId, NodeId, Vec<ComponentId>)] {
+        &self.conflicting_systems
+    }
+
+    /// Adds the systems to the graph. Returns a vector of all node ids contained the nested `SystemConfigs`
+    /// if `ancestor_chained` is true. Also returns true if "densely chained", meaning that all nested items
+    /// are linearly chained in the order they are defined
+    fn add_systems_inner(
         &mut self,
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
         system: impl IntoSystemConfig<P>,
     ) -> Result<NodeId, ScheduleBuildError> {
         let SystemConfig {
@@ -338,7 +581,151 @@ impl ScheduleGraph {
             mut graph_info,
             conditions,
         } = system.into_config();
+=======
+        configs: SystemConfigs,
+        ancestor_chained: bool,
+    ) -> AddSystemsInnerResult {
+        match configs {
+            SystemConfigs::SystemConfig(config) => {
+                let node_id = self.add_system_inner(config).unwrap();
+                if ancestor_chained {
+                    AddSystemsInnerResult {
+                        densely_chained: true,
+                        nodes: vec![node_id],
+                    }
+                } else {
+                    AddSystemsInnerResult {
+                        densely_chained: true,
+                        nodes: Vec::new(),
+                    }
+                }
+            }
+            SystemConfigs::Configs {
+                mut configs,
+                collective_conditions,
+                chained,
+            } => {
+                let more_than_one_entry = configs.len() > 1;
+                if !collective_conditions.is_empty() {
+                    if more_than_one_entry {
+                        let set = AnonymousSet::new();
+                        for config in &mut configs {
+                            config.in_set_inner(set.dyn_clone());
+                        }
+                        let mut set_config = set.into_config();
+                        set_config.conditions.extend(collective_conditions);
+                        self.configure_set(set_config);
+                    } else {
+                        for condition in collective_conditions {
+                            configs[0].run_if_inner(condition);
+                        }
+                    }
+                }
+                let mut config_iter = configs.into_iter();
+                let mut nodes_in_scope = Vec::new();
+                let mut densely_chained = true;
+                if chained {
+                    let Some(prev) = config_iter.next() else {
+                        return AddSystemsInnerResult {
+                            nodes: Vec::new(),
+                            densely_chained: true
+                        }
+                    };
+                    let mut previous_result = self.add_systems_inner(prev, true);
+                    densely_chained = previous_result.densely_chained;
+                    for current in config_iter {
+                        let current_result = self.add_systems_inner(current, true);
+                        densely_chained = densely_chained && current_result.densely_chained;
+                        match (
+                            previous_result.densely_chained,
+                            current_result.densely_chained,
+                        ) {
+                            // Both groups are "densely" chained, so we can simplify the graph by only
+                            // chaining the last in the previous list to the first in the current list
+                            (true, true) => {
+                                let last_in_prev = previous_result.nodes.last().unwrap();
+                                let first_in_current = current_result.nodes.first().unwrap();
+                                self.dependency.graph.add_edge(
+                                    *last_in_prev,
+                                    *first_in_current,
+                                    (),
+                                );
+                            }
+                            // The previous group is "densely" chained, so we can simplify the graph by only
+                            // chaining the last item from the previous list to every item in the current list
+                            (true, false) => {
+                                let last_in_prev = previous_result.nodes.last().unwrap();
+                                for current_node in &current_result.nodes {
+                                    self.dependency.graph.add_edge(
+                                        *last_in_prev,
+                                        *current_node,
+                                        (),
+                                    );
+                                }
+                            }
+                            // The current list is currently "densely" chained, so we can simplify the graph by
+                            // only chaining every item in the previous list to the first item in the current list
+                            (false, true) => {
+                                let first_in_current = current_result.nodes.first().unwrap();
+                                for previous_node in &previous_result.nodes {
+                                    self.dependency.graph.add_edge(
+                                        *previous_node,
+                                        *first_in_current,
+                                        (),
+                                    );
+                                }
+                            }
+                            // Neither of the lists are "densely" chained, so we must chain every item in the first
+                            // list to every item in the second list
+                            (false, false) => {
+                                for previous_node in &previous_result.nodes {
+                                    for current_node in &current_result.nodes {
+                                        self.dependency.graph.add_edge(
+                                            *previous_node,
+                                            *current_node,
+                                            (),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
 
+                        if ancestor_chained {
+                            nodes_in_scope.append(&mut previous_result.nodes);
+                        }
+
+                        previous_result = current_result;
+                    }
+
+                    // ensure the last config's nodes are added
+                    if ancestor_chained {
+                        nodes_in_scope.append(&mut previous_result.nodes);
+                    }
+                } else {
+                    for config in config_iter {
+                        let result = self.add_systems_inner(config, ancestor_chained);
+                        densely_chained = densely_chained && result.densely_chained;
+                        if ancestor_chained {
+                            nodes_in_scope.extend(result.nodes);
+                        }
+                    }
+
+                    // an "unchained" SystemConfig is only densely chained if it has exactly one densely chained entry
+                    if more_than_one_entry {
+                        densely_chained = false;
+                    }
+                }
+
+                AddSystemsInnerResult {
+                    nodes: nodes_in_scope,
+                    densely_chained,
+                }
+            }
+        }
+    }
+
+    fn add_system_inner(&mut self, config: SystemConfig) -> Result<NodeId, ScheduleBuildError> {
         let id = NodeId::System(self.systems.len());
 
         if graph_info.sets.is_empty() {
@@ -348,12 +735,21 @@ impl ScheduleGraph {
         }
 
         // graph updates are immediate
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
         self.update_graphs(id, graph_info)?;
 
         // system init has to be deferred (need `&mut World`)
         self.uninit.push((id, 0));
         self.systems.push(Some(system));
         self.system_conditions.push(Some(conditions));
+=======
+        self.update_graphs(id, config.graph_info)?;
+
+        // system init has to be deferred (need `&mut World`)
+        self.uninit.push((id, 0));
+        self.systems.push(SystemNode::new(config.system));
+        self.system_conditions.push(Some(config.conditions));
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
 
         Ok(id)
     }
@@ -427,6 +823,24 @@ impl ScheduleGraph {
         id
     }
 
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
+=======
+    fn check_set(&mut self, id: &NodeId, set: &dyn SystemSet) -> Result<(), ScheduleBuildError> {
+        match self.system_set_ids.get(set) {
+            Some(set_id) => {
+                if id == set_id {
+                    return Err(ScheduleBuildError::HierarchyLoop(self.get_node_name(id)));
+                }
+            }
+            None => {
+                self.add_set(set.dyn_clone());
+            }
+        }
+
+        Ok(())
+    }
+
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
     fn check_sets(
         &mut self,
         id: &NodeId,
@@ -457,7 +871,11 @@ impl ScheduleGraph {
             match self.system_set_ids.get(set) {
                 Some(set_id) => {
                     if id == set_id {
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
                         return Err(ScheduleBuildError::DependencyLoop(set.dyn_clone()));
+=======
+                        return Err(ScheduleBuildError::DependencyLoop(self.get_node_name(id)));
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
                     }
                 }
                 None => {
@@ -490,6 +908,10 @@ impl ScheduleGraph {
             sets,
             dependencies,
             ambiguous_with,
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
+=======
+            ..
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
         } = graph_info;
 
         if !self.hierarchy.graph.contains_node(id) {
@@ -498,6 +920,12 @@ impl ScheduleGraph {
 
         for set in sets.into_iter().map(|set| self.system_set_ids[&set]) {
             self.hierarchy.graph.add_edge(set, id, ());
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
+=======
+
+            // ensure set also appears in dependency graph
+            self.dependency.graph.add_node(set);
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
         }
 
         if !self.dependency.graph.contains_node(id) {
@@ -533,7 +961,8 @@ impl ScheduleGraph {
         Ok(())
     }
 
-    fn initialize(&mut self, world: &mut World) {
+    /// Initializes any newly-added systems and conditions by calling [`System::initialize`]
+    pub fn initialize(&mut self, world: &mut World) {
         for (id, i) in self.uninit.drain(..) {
             match id {
                 NodeId::System(index) => {
@@ -555,6 +984,7 @@ impl ScheduleGraph {
         }
     }
 
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
     fn build_schedule(&mut self) -> Result<SystemSchedule, ScheduleBuildError> {
         // check hierarchy for cycles
         let hier_scc = tarjan_scc(&self.hierarchy.graph);
@@ -564,6 +994,21 @@ impl ScheduleGraph {
         }
 
         self.hierarchy.topsort = hier_scc.into_iter().flatten().rev().collect::<Vec<_>>();
+=======
+    /// Build a [`SystemSchedule`] optimized for scheduler access from the [`ScheduleGraph`].
+    ///
+    /// This method also
+    /// - checks for dependency or hierarchy cycles
+    /// - checks for system access conflicts and reports ambiguities
+    pub fn build_schedule(
+        &mut self,
+        components: &Components,
+    ) -> Result<SystemSchedule, ScheduleBuildError> {
+        // check hierarchy for cycles
+        self.hierarchy.topsort = self
+            .topsort_graph(&self.hierarchy.graph, ReportCycles::Hierarchy)
+            .map_err(|_| ScheduleBuildError::HierarchyCycle)?;
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
 
         let hier_results = check_graph(&self.hierarchy.graph, &self.hierarchy.topsort);
         if self.contains_hierarchy_conflicts(&hier_results.transitive_edges) {
@@ -577,13 +1022,9 @@ impl ScheduleGraph {
         self.hierarchy.graph = hier_results.transitive_reduction;
 
         // check dependencies for cycles
-        let dep_scc = tarjan_scc(&self.dependency.graph);
-        if self.contains_cycles(&dep_scc) {
-            self.report_cycles(&dep_scc);
-            return Err(ScheduleBuildError::DependencyCycle);
-        }
-
-        self.dependency.topsort = dep_scc.into_iter().flatten().rev().collect::<Vec<_>>();
+        self.dependency.topsort = self
+            .topsort_graph(&self.dependency.graph, ReportCycles::Dependency)
+            .map_err(|_| ScheduleBuildError::DependencyCycle)?;
 
         // nodes can have dependent XOR hierarchical relationship
         let dep_results = check_graph(&self.dependency.graph, &self.dependency.topsort);
@@ -657,6 +1098,7 @@ impl ScheduleGraph {
             }
         }
 
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
         for (lhs, rhs, _) in self.dependency.graph.all_edges() {
             match (lhs, rhs) {
                 (NodeId::System(_), NodeId::System(_)) => {
@@ -689,9 +1131,13 @@ impl ScheduleGraph {
             return Err(ScheduleBuildError::DependencyCycle);
         }
 
+=======
+        // topsort
+        self.dependency_flattened.topsort = self
+            .topsort_graph(&dependency_flattened, ReportCycles::Dependency)
+            .map_err(|_| ScheduleBuildError::DependencyCycle)?;
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
         self.dependency_flattened.graph = dependency_flattened;
-        self.dependency_flattened.topsort =
-            flat_scc.into_iter().flatten().rev().collect::<Vec<_>>();
 
         let flat_results = check_graph(
             &self.dependency_flattened.graph,
@@ -709,18 +1155,31 @@ impl ScheduleGraph {
                     ambiguous_with_flattened.add_edge(lhs, rhs, ());
                 }
                 (NodeId::Set(_), NodeId::System(_)) => {
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
                     for &lhs_ in &systems_in_sets[&lhs] {
+=======
+                    for &lhs_ in set_systems.get(&lhs).unwrap_or(&Vec::new()) {
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
                         ambiguous_with_flattened.add_edge(lhs_, rhs, ());
                     }
                 }
                 (NodeId::System(_), NodeId::Set(_)) => {
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
                     for &rhs_ in &systems_in_sets[&rhs] {
+=======
+                    for &rhs_ in set_systems.get(&rhs).unwrap_or(&Vec::new()) {
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
                         ambiguous_with_flattened.add_edge(lhs, rhs_, ());
                     }
                 }
                 (NodeId::Set(_), NodeId::Set(_)) => {
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
                     for &lhs_ in &systems_in_sets[&lhs] {
                         for &rhs_ in &systems_in_sets[&rhs] {
+=======
+                    for &lhs_ in set_systems.get(&lhs).unwrap_or(&Vec::new()) {
+                        for &rhs_ in set_systems.get(&rhs).unwrap_or(&vec![]) {
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
                             ambiguous_with_flattened.add_edge(lhs_, rhs_, ());
                         }
                     }
@@ -732,7 +1191,7 @@ impl ScheduleGraph {
 
         // check for conflicts
         let mut conflicting_systems = Vec::new();
-        for &(a, b) in flat_results.disconnected.iter() {
+        for &(a, b) in &flat_results.disconnected {
             if self.ambiguous_with_flattened.contains_edge(a, b)
                 || self.ambiguous_with_all.contains(&a)
                 || self.ambiguous_with_all.contains(&b)
@@ -760,6 +1219,7 @@ impl ScheduleGraph {
                 return Err(ScheduleBuildError::Ambiguity);
             }
         }
+        self.conflicting_systems = conflicting_systems;
 
         // build the schedule
         let dg_system_ids = self.dependency_flattened.topsort.clone();
@@ -902,11 +1362,29 @@ impl ScheduleGraph {
 
         Ok(())
     }
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
+=======
+}
+
+/// Values returned by `ScheduleGraph::add_systems_inner`
+struct AddSystemsInnerResult {
+    /// All nodes contained inside this add_systems_inner call's SystemConfigs hierarchy
+    nodes: Vec<NodeId>,
+    /// True if and only if all nodes are "densely chained"
+    densely_chained: bool,
+}
+
+/// Used to select the appropriate reporting function.
+enum ReportCycles {
+    Hierarchy,
+    Dependency,
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
 }
 
 // methods for reporting errors
 impl ScheduleGraph {
     fn get_node_name(&self, id: &NodeId) -> String {
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
         match id {
             NodeId::System(_) => self.systems[id.index()]
                 .as_ref()
@@ -914,10 +1392,52 @@ impl ScheduleGraph {
                 .name()
                 .to_string(),
             NodeId::Set(_) => self.system_sets[id.index()].name(),
+=======
+        let mut name = match id {
+            NodeId::System(_) => {
+                let name = self.systems[id.index()].get().unwrap().name().to_string();
+                if self.settings.report_sets {
+                    let sets = self.names_of_sets_containing_node(id);
+                    if sets.is_empty() {
+                        name
+                    } else if sets.len() == 1 {
+                        format!("{name} (in set {})", sets[0])
+                    } else {
+                        format!("{name} (in sets {})", sets.join(", "))
+                    }
+                } else {
+                    name
+                }
+            }
+            NodeId::Set(_) => {
+                let set = &self.system_sets[id.index()];
+                if set.is_anonymous() {
+                    self.anonymous_set_name(id)
+                } else {
+                    set.name()
+                }
+            }
+        };
+        if self.settings.use_shortnames {
+            name = bevy_utils::get_short_name(&name);
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
         }
+        name
     }
 
-    fn get_node_kind(id: &NodeId) -> &'static str {
+    fn anonymous_set_name(&self, id: &NodeId) -> String {
+        format!(
+            "({})",
+            self.hierarchy
+                .graph
+                .edges_directed(*id, Direction::Outgoing)
+                .map(|(_, member_id, _)| self.get_node_name(&member_id))
+                .reduce(|a, b| format!("{a}, {b}"))
+                .unwrap_or_default()
+        )
+    }
+
+    fn get_node_kind(&self, id: &NodeId) -> &'static str {
         match id {
             NodeId::System(_) => "system",
             NodeId::Set(_) => "system set",
@@ -938,7 +1458,7 @@ impl ScheduleGraph {
             writeln!(
                 message,
                 " -- {:?} '{:?}' cannot be child of set '{:?}', longer path exists",
-                Self::get_node_kind(child),
+                self.get_node_kind(child),
                 self.get_node_name(child),
                 self.get_node_name(parent),
             )
@@ -948,36 +1468,95 @@ impl ScheduleGraph {
         error!("{}", message);
     }
 
-    fn contains_cycles(&self, strongly_connected_components: &[Vec<NodeId>]) -> bool {
-        if strongly_connected_components
-            .iter()
-            .all(|scc| scc.len() == 1)
-        {
-            return false;
-        }
+    /// Tries to topologically sort `graph`.
+    ///
+    /// If the graph is acyclic, returns [`Ok`] with the list of [`NodeId`] in a valid
+    /// topological order. If the graph contains cycles, returns [`Err`] with the list of
+    /// strongly-connected components that contain cycles (also in a valid topological order).
+    ///
+    /// # Errors
+    ///
+    /// If the graph contain cycles, then an error is returned.
+    fn topsort_graph(
+        &self,
+        graph: &DiGraphMap<NodeId, ()>,
+        report: ReportCycles,
+    ) -> Result<Vec<NodeId>, Vec<Vec<NodeId>>> {
+        // Tarjan's SCC algorithm returns elements in *reverse* topological order.
+        let mut tarjan_scc = TarjanScc::new();
+        let mut top_sorted_nodes = Vec::with_capacity(graph.node_count());
+        let mut sccs_with_cycles = Vec::new();
 
-        true
+        tarjan_scc.run(graph, |scc| {
+            // A strongly-connected component is a group of nodes who can all reach each other
+            // through one or more paths. If an SCC contains more than one node, there must be
+            // at least one cycle within them.
+            if scc.len() > 1 {
+                sccs_with_cycles.push(scc.to_vec());
+            }
+            top_sorted_nodes.extend_from_slice(scc);
+        });
+
+        if sccs_with_cycles.is_empty() {
+            // reverse to get topological order
+            top_sorted_nodes.reverse();
+            Ok(top_sorted_nodes)
+        } else {
+            let mut cycles = Vec::new();
+            for scc in &sccs_with_cycles {
+                cycles.append(&mut simple_cycles_in_component(graph, scc));
+            }
+
+            match report {
+                ReportCycles::Hierarchy => self.report_hierarchy_cycles(&cycles),
+                ReportCycles::Dependency => self.report_dependency_cycles(&cycles),
+            }
+
+            Err(sccs_with_cycles)
+        }
     }
 
-    fn report_cycles(&self, strongly_connected_components: &[Vec<NodeId>]) {
-        let components_with_cycles = strongly_connected_components
-            .iter()
-            .filter(|scc| scc.len() > 1)
-            .cloned()
-            .collect::<Vec<_>>();
+    /// Logs details of cycles in the hierarchy graph.
+    fn report_hierarchy_cycles(&self, cycles: &[Vec<NodeId>]) {
+        let mut message = format!("schedule has {} in_set cycle(s):\n", cycles.len());
+        for (i, cycle) in cycles.iter().enumerate() {
+            let mut names = cycle.iter().map(|id| self.get_node_name(id));
+            let first_name = names.next().unwrap();
+            writeln!(
+                message,
+                "cycle {}: set '{first_name}' contains itself",
+                i + 1,
+            )
+            .unwrap();
+            writeln!(message, "set '{first_name}'").unwrap();
+            for name in names.chain(std::iter::once(first_name)) {
+                writeln!(message, " ... which contains set '{name}'").unwrap();
+            }
+            writeln!(message).unwrap();
+        }
 
-        let mut message = format!(
-            "schedule contains at least {} cycle(s)",
-            components_with_cycles.len()
-        );
+        error!("{}", message);
+    }
 
-        writeln!(message, " -- cycle(s) found within:").unwrap();
-        for (i, scc) in components_with_cycles.into_iter().enumerate() {
-            let names = scc
+    /// Logs details of cycles in the dependency graph.
+    fn report_dependency_cycles(&self, cycles: &[Vec<NodeId>]) {
+        let mut message = format!("schedule has {} before/after cycle(s):\n", cycles.len());
+        for (i, cycle) in cycles.iter().enumerate() {
+            let mut names = cycle
                 .iter()
-                .map(|id| self.get_node_name(id))
-                .collect::<Vec<_>>();
-            writeln!(message, " ---- {i}: {names:?}").unwrap();
+                .map(|id| (self.get_node_kind(id), self.get_node_name(id)));
+            let (first_kind, first_name) = names.next().unwrap();
+            writeln!(
+                message,
+                "cycle {}: {first_kind} '{first_name}' must run before itself",
+                i + 1,
+            )
+            .unwrap();
+            writeln!(message, "{first_kind} '{first_name}'").unwrap();
+            for (kind, name) in names.chain(std::iter::once((first_kind, first_name))) {
+                writeln!(message, " ... which must run before {kind} '{name}'").unwrap();
+            }
+            writeln!(message).unwrap();
         }
 
         error!("{}", message);
@@ -1014,6 +1593,27 @@ impl ScheduleGraph {
         }
 
         warn!("{}", string);
+    }
+
+    fn traverse_sets_containing_node(&self, id: NodeId, f: &mut impl FnMut(NodeId) -> bool) {
+        for (set_id, _, _) in self.hierarchy.graph.edges_directed(id, Direction::Incoming) {
+            if f(set_id) {
+                self.traverse_sets_containing_node(set_id, f);
+            }
+        }
+    }
+
+    fn names_of_sets_containing_node(&self, id: &NodeId) -> Vec<String> {
+        let mut sets = HashSet::new();
+        self.traverse_sets_containing_node(*id, &mut |set_id| {
+            !self.system_sets[set_id.index()].is_system_type() && sets.insert(set_id)
+        });
+        let mut sets: Vec<_> = sets
+            .into_iter()
+            .map(|set_id| self.get_node_name(&set_id))
+            .collect();
+        sets.sort();
+        sets
     }
 }
 
@@ -1056,6 +1656,11 @@ pub enum ScheduleBuildError {
 
 /// Specifies how schedule construction should respond to detecting a certain kind of issue.
 pub enum LogLevel {
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/schedule.rs
+=======
+    /// Occurrences are completely ignored.
+    Ignore,
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/schedule.rs
     /// Occurrences are logged only.
     Warn,
     /// Occurrences are logged and result in errors.
@@ -1064,8 +1669,25 @@ pub enum LogLevel {
 
 /// Specifies miscellaneous settings for schedule construction.
 pub struct ScheduleBuildSettings {
-    ambiguity_detection: LogLevel,
-    hierarchy_detection: LogLevel,
+    /// Determines whether the presence of ambiguities (systems with conflicting access but indeterminate order)
+    /// is only logged or also results in an [`Ambiguity`](ScheduleBuildError::Ambiguity) error.
+    ///
+    /// Defaults to [`LogLevel::Ignore`].
+    pub ambiguity_detection: LogLevel,
+    /// Determines whether the presence of redundant edges in the hierarchy of system sets is only
+    /// logged or also results in a [`HierarchyRedundancy`](ScheduleBuildError::HierarchyRedundancy)
+    /// error.
+    ///
+    /// Defaults to [`LogLevel::Warn`].
+    pub hierarchy_detection: LogLevel,
+    /// If set to true, node names will be shortened instead of the fully qualified type path.
+    ///
+    /// Defaults to `true`.
+    pub use_shortnames: bool,
+    /// If set to true, report all system sets the conflicting systems are part of.
+    ///
+    /// Defaults to `true`.
+    pub report_sets: bool,
 }
 
 impl Default for ScheduleBuildSettings {
@@ -1079,21 +1701,8 @@ impl ScheduleBuildSettings {
         Self {
             ambiguity_detection: LogLevel::Warn,
             hierarchy_detection: LogLevel::Warn,
+            use_shortnames: true,
+            report_sets: true,
         }
-    }
-
-    /// Determines whether the presence of ambiguities (systems with conflicting access but indeterminate order)
-    /// is only logged or also results in an [`Ambiguity`](ScheduleBuildError::Ambiguity) error.
-    pub fn with_ambiguity_detection(mut self, level: LogLevel) -> Self {
-        self.ambiguity_detection = level;
-        self
-    }
-
-    /// Determines whether the presence of redundant edges in the hierarchy of system sets is only
-    /// logged or also results in a [`HierarchyRedundancy`](ScheduleBuildError::HierarchyRedundancy)
-    /// error.
-    pub fn with_hierarchy_detection(mut self, level: LogLevel) -> Self {
-        self.hierarchy_detection = level;
-        self
     }
 }

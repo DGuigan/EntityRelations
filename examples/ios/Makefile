@@ -6,7 +6,11 @@ ifndef DEVICE_ID
 endif
 
 run: install
+<<<<<<< HEAD:examples/ios/Makefile
 	xcrun simctl launch --console $(DEVICE) com.rust.bevy-ios-example
+=======
+	xcrun simctl launch --console $(DEVICE) org.bevyengine.example
+>>>>>>> github/main:examples/mobile/Makefile
 
 boot-sim:
 	xcrun simctl boot $(DEVICE) || true

@@ -32,7 +32,11 @@ pub fn empty_systems(criterion: &mut Criterion) {
     for amount in 0..5 {
         let mut stage = SystemStage::parallel();
         for _ in 0..amount {
+<<<<<<< HEAD:benches/benches/bevy_ecs/scheduling/stages.rs
             stage.add_system(empty);
+=======
+            schedule.add_systems(empty);
+>>>>>>> github/main:benches/benches/bevy_ecs/scheduling/running_systems.rs
         }
         run_stage(&mut stage, &mut world);
         group.bench_function(&format!("{:03}_systems", amount), |bencher| {
@@ -44,12 +48,16 @@ pub fn empty_systems(criterion: &mut Criterion) {
     for amount in 1..21 {
         let mut stage = SystemStage::parallel();
         for _ in 0..amount {
+<<<<<<< HEAD:benches/benches/bevy_ecs/scheduling/stages.rs
             stage
                 .add_system(empty)
                 .add_system(empty)
                 .add_system(empty)
                 .add_system(empty)
                 .add_system(empty);
+=======
+            schedule.add_systems((empty, empty, empty, empty, empty));
+>>>>>>> github/main:benches/benches/bevy_ecs/scheduling/running_systems.rs
         }
         run_stage(&mut stage, &mut world);
         group.bench_function(&format!("{:03}_systems", 5 * amount), |bencher| {
@@ -87,10 +95,17 @@ pub fn busy_systems(criterion: &mut Criterion) {
         world.spawn_batch((0..ENTITY_BUNCH).map(|_| (A(0.0), B(0.0), C(0.0), D(0.0))));
         world.spawn_batch((0..ENTITY_BUNCH).map(|_| (A(0.0), B(0.0), C(0.0), E(0.0))));
         for system_amount in 0..5 {
+<<<<<<< HEAD:benches/benches/bevy_ecs/scheduling/stages.rs
             let mut stage = SystemStage::parallel();
             stage.add_system(ab).add_system(cd).add_system(ce);
             for _ in 0..system_amount {
                 stage.add_system(ab).add_system(cd).add_system(ce);
+=======
+            let mut schedule = Schedule::new();
+            schedule.add_systems((ab, cd, ce));
+            for _ in 0..system_amount {
+                schedule.add_systems((ab, cd, ce));
+>>>>>>> github/main:benches/benches/bevy_ecs/scheduling/running_systems.rs
             }
             run_stage(&mut stage, &mut world);
             group.bench_function(
@@ -138,10 +153,17 @@ pub fn contrived(criterion: &mut Criterion) {
         world.spawn_batch((0..ENTITY_BUNCH).map(|_| (A(0.0), B(0.0))));
         world.spawn_batch((0..ENTITY_BUNCH).map(|_| (C(0.0), D(0.0))));
         for system_amount in 0..5 {
+<<<<<<< HEAD:benches/benches/bevy_ecs/scheduling/stages.rs
             let mut stage = SystemStage::parallel();
             stage.add_system(s_0).add_system(s_1).add_system(s_2);
             for _ in 0..system_amount {
                 stage.add_system(s_0).add_system(s_1).add_system(s_2);
+=======
+            let mut schedule = Schedule::new();
+            schedule.add_systems((s_0, s_1, s_2));
+            for _ in 0..system_amount {
+                schedule.add_systems((s_0, s_1, s_2));
+>>>>>>> github/main:benches/benches/bevy_ecs/scheduling/running_systems.rs
             }
             run_stage(&mut stage, &mut world);
             group.bench_function(

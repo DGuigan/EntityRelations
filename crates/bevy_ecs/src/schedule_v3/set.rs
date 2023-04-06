@@ -1,14 +1,15 @@
+use std::any::TypeId;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub use bevy_ecs_macros::{ScheduleLabel, SystemSet};
 use bevy_utils::define_boxed_label;
 use bevy_utils::label::DynHash;
 
 use crate::system::{
-    ExclusiveSystemParam, ExclusiveSystemParamFunction, IsExclusiveFunctionSystem,
-    IsFunctionSystem, SystemParam, SystemParamFunction,
+    ExclusiveSystemParamFunction, IsExclusiveFunctionSystem, IsFunctionSystem, SystemParamFunction,
 };
 
 define_boxed_label!(ScheduleLabel);
@@ -18,12 +19,20 @@ pub type BoxedScheduleLabel = Box<dyn ScheduleLabel>;
 
 /// Types that identify logical groups of systems.
 pub trait SystemSet: DynHash + Debug + Send + Sync + 'static {
-    /// Returns `true` if this system set is a [`SystemTypeSet`].
-    fn is_system_type(&self) -> bool {
-        false
+    /// Returns `Some` if this system set is a [`SystemTypeSet`].
+    fn system_type(&self) -> Option<TypeId> {
+        None
     }
 
+<<<<<<< HEAD:crates/bevy_ecs/src/schedule_v3/set.rs
     #[doc(hidden)]
+=======
+    /// Returns `true` if this system set is an [`AnonymousSet`].
+    fn is_anonymous(&self) -> bool {
+        false
+    }
+    /// Creates a boxed clone of the label corresponding to this system set.
+>>>>>>> github/main:crates/bevy_ecs/src/schedule/set.rs
     fn dyn_clone(&self) -> Box<dyn SystemSet>;
 }
 
@@ -93,7 +102,30 @@ impl<T> PartialEq for SystemTypeSet<T> {
 impl<T> Eq for SystemTypeSet<T> {}
 
 impl<T> SystemSet for SystemTypeSet<T> {
-    fn is_system_type(&self) -> bool {
+    fn system_type(&self) -> Option<TypeId> {
+        Some(TypeId::of::<T>())
+    }
+
+    fn dyn_clone(&self) -> Box<dyn SystemSet> {
+        Box::new(*self)
+    }
+}
+
+/// A [`SystemSet`] implicitly created when using
+/// [`Schedule::add_systems`](super::Schedule::add_systems).
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct AnonymousSet(usize);
+
+static NEXT_ANONYMOUS_SET_ID: AtomicUsize = AtomicUsize::new(0);
+
+impl AnonymousSet {
+    pub(crate) fn new() -> Self {
+        Self(NEXT_ANONYMOUS_SET_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+impl SystemSet for AnonymousSet {
+    fn is_anonymous(&self) -> bool {
         true
     }
 
@@ -120,10 +152,9 @@ impl<S: SystemSet> IntoSystemSet<()> for S {
 }
 
 // systems
-impl<In, Out, Param, Marker, F> IntoSystemSet<(IsFunctionSystem, In, Out, Param, Marker)> for F
+impl<Marker, F> IntoSystemSet<(IsFunctionSystem, Marker)> for F
 where
-    Param: SystemParam,
-    F: SystemParamFunction<In, Out, Param, Marker>,
+    F: SystemParamFunction<Marker>,
 {
     type Set = SystemTypeSet<Self>;
 
@@ -134,11 +165,9 @@ where
 }
 
 // exclusive systems
-impl<In, Out, Param, Marker, F> IntoSystemSet<(IsExclusiveFunctionSystem, In, Out, Param, Marker)>
-    for F
+impl<Marker, F> IntoSystemSet<(IsExclusiveFunctionSystem, Marker)> for F
 where
-    Param: ExclusiveSystemParam,
-    F: ExclusiveSystemParamFunction<In, Out, Param, Marker>,
+    F: ExclusiveSystemParamFunction<Marker>,
 {
     type Set = SystemTypeSet<Self>;
 
