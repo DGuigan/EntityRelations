@@ -241,7 +241,7 @@ where
         {
             world
                 .get_entity_mut(old_target)
-                .expect("Dangling relations should not exist")
+                .expect("Foster should not have dangling entries")
                 .get_mut::<Edges>()
                 .expect("Edge component should exist")
                 .fosters
@@ -253,13 +253,14 @@ where
             foster_indices.insert(self.target, index);
             foster_storage.values[index] = self.relation;
 
-            // Do not pull out `world.get_entity .. insert(..)` outside branch.
+            // Do not pull `world.get_entity .. insert(..)` outside branch.
             // Components need to exist on entity when cleanup code is called.
             world
                 .get_entity_mut(self.foster)
                 .unwrap()
                 .insert((foster_edges, foster_storage));
 
+            // TODO: Cleanup
             // old_target removed so call cleanup code here
         } else {
             if let Some(index) = foster_indices.get(&self.target) {
@@ -293,5 +294,54 @@ where
                 .unwrap()
                 .insert((foster_edges, foster_storage));
         }
+    }
+}
+
+pub struct UnSet<R>
+where
+    R: Relation,
+{
+    pub foster: Entity,
+    pub target: Entity,
+    pub _phantom: PhantomData<R>,
+}
+
+impl<R> Command for UnSet<R>
+where
+    R: Relation,
+{
+    fn write(self, world: &mut World) {
+        if world
+            .get_mut::<Edges>(self.foster)
+            .map_or(false, |mut edges| {
+                edges.targets[R::DESPAWN_POLICY as usize]
+                    .get_mut(&TypeId::of::<Storage<R>>())
+                    .and_then(|indices| indices.remove(&self.target))
+                    .is_some()
+            })
+        {
+            world
+                .get_mut::<Edges>(self.target)
+                .expect("Edge component should exist")
+                .fosters
+                .get_mut(&TypeId::of::<Storage<R>>())
+                .expect("Target should have relation entry")
+                .remove(&self.foster);
+
+            // TODO: Cleanup
+        }
+    }
+}
+
+pub struct CheckeDespawn {
+    pub entity: Entity,
+}
+
+impl Command for CheckeDespawn {
+    fn write(self, world: &mut World) {
+        if let Some(indices) = world.get_mut::<Edges>(self.entity) {
+            // TODO: Cleanup
+        }
+        world.despawn(self.entity);
     }
 }
