@@ -1,3 +1,4 @@
+use crate::system::Command;
 use bevy_utils::{HashMap, HashSet};
 use core::any::TypeId;
 use smallvec::SmallVec;
@@ -6,7 +7,7 @@ use std::marker::PhantomData;
 use crate as bevy_ecs;
 
 use crate::{
-    component::{Component, ComponentId, ComponentStorage},
+    component::{Component, ComponentStorage},
     entity::Entity,
     query::{ReadOnlyWorldQuery, WorldQuery},
     system::Query,
@@ -48,7 +49,7 @@ impl<R: Relation> Component for Storage<R> {
     type Storage = R::Storage;
 }
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct Edges {
     pub(crate) targets: [HashMap<TypeId, HashMap<Entity, usize>>; 4],
     pub(crate) fosters: HashMap<TypeId, HashSet<Entity>>,
@@ -79,7 +80,7 @@ pub trait Relation: 'static + Sized + Send + Sync {
     const EXCLUSIVE: bool = false;
 }
 
-/*#[derive(WorldQuery)]
+#[derive(WorldQuery)]
 pub struct StorageWorldQuery<R: Relation> {
     storage: &'static Storage<R>,
 }
@@ -88,7 +89,7 @@ pub struct StorageWorldQuery<R: Relation> {
 #[world_query(mutable)]
 pub struct StorageWorldQueryMut<R: Relation> {
     storage: &'static mut Storage<R>,
-}*/
+}
 
 pub trait RelationQuerySet: Sealed + Send + Sync {
     type Types;
@@ -98,13 +99,13 @@ pub trait RelationQuerySet: Sealed + Send + Sync {
 
 impl<R: Relation> RelationQuerySet for &'_ R {
     type Types = R;
-    type WorldQuery = &'static Storage<R>;
+    type WorldQuery = StorageWorldQuery<R>;
     type ColsWith<T: Default> = T;
 }
 
 impl<R: Relation> RelationQuerySet for &'_ mut R {
     type Types = R;
-    type WorldQuery = &'static mut Storage<R>;
+    type WorldQuery = StorageWorldQueryMut<R>;
     type ColsWith<T: Default> = T;
 }
 
@@ -174,10 +175,6 @@ where
     }
 }
 
-/*pub(crate) type FetchItem<'a, R> =
-    <<<R as RelationSet>::WorldQuery as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
-pub(crate) type FetchItemMut<'a, R> = <<R as RelationSet>::WorldQuery as WorldQuery>::Item<'a>;*/
-
 pub enum ControlFlow {
     Continue,
     Exit,
@@ -192,10 +189,44 @@ impl From<()> for ControlFlow {
 // It is nessecary to pass the tuples back into the trait itself
 // otherwise we get mysterious HRTB errors about impls on FnOnce not being general enough
 pub trait ForEachPermutations<EdgeTup, StorageTup, JoinTup> {
-    //type Components<'a>;
-    type Joins<'a>;
-    fn for_each_permutations<Func, Ret>(self, func: Func)
+    type Components<'a>;
+    //type Joins<'a>;
+    fn for_each<Func, Ret>(self, func: Func)
     where
         Ret: Into<ControlFlow>,
-        Func: for<'a> FnMut(/*&'a mut Self::Components<'b>,*/ Self::Joins<'a>) -> Ret;
+        Func: for<'a> FnMut(&mut Self::Components<'a> /*, Self::Joins<'a>*/) -> Ret;
+}
+
+pub struct Set<R>
+where
+    R: Relation,
+{
+    pub foster: Entity,
+    pub target: Entity,
+    pub relation: R,
+}
+
+impl<R> Command for Set<R>
+where
+    R: Relation,
+{
+    fn write(self, world: &mut World) {
+        let mut foster = world
+            .get_entity_mut(self.foster)
+            .expect("Foster dose not exist");
+
+        let mut edges = foster.take::<Edges>().unwrap_or_else(|| Edges::default());
+
+        let mut storage = foster.take::<Storage<R>>().unwrap_or_else(|| Storage::<R> {
+            values: SmallVec::new(),
+        });
+
+        if let Some(index) = edges.targets[R::DESPAWN_POLICY as usize]
+            .entry(TypeId::of::<Storage<R>>())
+            .or_default()
+            .get(&self.target)
+        {
+        } else {
+        }
+    }
 }

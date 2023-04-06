@@ -26,6 +26,9 @@ where
 {
 }
 
+//trait Check<Key> {}
+//trait Join<Key> {}
+
 pub trait Join<'j, Storage> {
     type Out;
     fn matches(&self, target: Entity) -> bool;
@@ -342,13 +345,13 @@ where
     E0: Relation,
     J0: for<'j> Join<'j, S0>,
 {
-    //type Components<'a> = <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
-    type Joins<'a> = <J0 as Join<'a, S0>>::Out;
+    type Components<'a> = <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
+    //type Joins<'a> = <J0 as Join<'a, S0>>::Out;
 
-    fn for_each_permutations<Func, Ret>(self, mut func: Func)
+    fn for_each<Func, Ret>(self, mut func: Func)
     where
         Ret: Into<ControlFlow>,
-        Func: for<'a> FnMut(/*&'a mut Self::Components<'b>,*/ Self::Joins<'a>) -> Ret,
+        Func: for<'a> FnMut(&mut Self::Components<'a> /*, Self::Joins<'a>*/) -> Ret,
     {
         let (mut j0,) = self.joins.flatten(());
         for (mut componantes, relations) in self.query.iter() {
@@ -357,7 +360,8 @@ where
                 if !j0.matches(e0.0) {
                     continue;
                 }
-                if let ControlFlow::Exit = func(/*&mut componantes,*/ j0.joined(e0, &mut s0)).into()
+                if let ControlFlow::Exit =
+                    func(&mut componantes /*, j0.joined(e0, &mut s0)*/).into()
                 {
                     return;
                 }
@@ -365,58 +369,6 @@ where
         }
     }
 }
-
-/*impl<E0, E1, S0, S1, J0, J1, Q, R, F, Joins, EdgeComb, StorageComb>
-    ForEachPermutations<(E0, E1), (S0, S1), (J0, J1)>
-    for Ops<&'_ Query<'_, '_, (Q, Relations<R>), F>, Joins, EdgeComb, StorageComb>
-where
-    Q: 'static + WorldQuery,
-    F: 'static + ReadOnlyWorldQuery,
-    R: RelationQuerySet,
-    for<'a> EdgeComb: Comb<<R::Types as EdgeIters>::Out<'a>>,
-    for<'a> <EdgeComb as Comb<<R::Types as EdgeIters>::Out<'a>>>::Out: Flatten<(), Out = (E0, E1)>,
-    for<'a> StorageComb: Comb<RelationItem<'a, R>>,
-    for<'a> <StorageComb as Comb<RelationItem<'a, R>>>::Out: Flatten<(), Out = (S0, S1)>,
-    Joins: Flatten<(), Out = (J0, J1)>,
-    E0: Clone + Iterator<Item = (Entity, usize)>,
-    E1: Clone + Iterator<Item = (Entity, usize)>,
-    J0: for<'j> Join<'j, S0>,
-    J1: for<'j> Join<'j, S1>,
-{
-    type Components<'a> = <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
-    type Joins<'a> = (<J0 as Join<'a, S0>>::Out, <J1 as Join<'a, S1>>::Out);
-
-    fn for_each_permutations<Func, Ret>(self, mut func: Func)
-    where
-        Ret: Into<ControlFlow>,
-        Func: FnMut(&mut Self::Components<'_>, Self::Joins<'_>) -> Ret,
-    {
-        let (mut j0, mut j1) = self.joins.flatten(());
-        for (mut componantes, relations) in self.query.iter() {
-            let (edges0, edges1) =
-                EdgeComb::comb(R::Types::edge_iters(relations.edges)).flatten(());
-            let (mut s0, mut s1) = StorageComb::comb(relations.world_query).flatten(());
-            for e0 in edges0 {
-                if !j0.matches(e0.0) {
-                    continue;
-                }
-                for e1 in edges1.clone() {
-                    if !j1.matches(e1.0) {
-                        continue;
-                    }
-                    if let ControlFlow::Exit = func(
-                        &mut componantes,
-                        (j0.joined(e0, &mut s0), j1.joined(e1, &mut s1)),
-                    )
-                    .into()
-                    {
-                        return;
-                    }
-                }
-            }
-        }
-    }
-}*/
 
 #[cfg(test)]
 #[allow(dead_code)]
@@ -450,7 +402,7 @@ mod compile_tests {
     struct E;
 
     fn join_immut(rq: Query<(&A, Relations<&B>)>, d: Query<&D>, e: Query<&E>) {
-        rq.ops().join::<B>(&e).for_each_permutations(|_| {});
+        rq.ops().join::<B>(&e).for_each(|_| {});
     }
 
     /*fn join_left_mut(mut rq: Query<(&A, Relations<(&mut C, &mut B)>)>, d: Query<&D>, e: Query<&E>) {
