@@ -136,7 +136,6 @@ impl<P0: RelationQuerySet, P1: RelationQuerySet> RelationQuerySet for (P0, P1) {
 pub struct Relations<T: RelationQuerySet> {
     edges: &'static Edges,
     world_query: T::WorldQuery,
-    #[world_query(ignore)]
     _phantom: PhantomData<T>,
 }
 
