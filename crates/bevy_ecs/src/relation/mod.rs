@@ -233,11 +233,16 @@ where
             .entry(TypeId::of::<Storage<R>>())
             .or_default();
 
-        if let Some((old_target, index)) = foster_indices
+        let mut exclusive_overwrite = None;
+
+        // TODO: Logging
+        if let Some(index) = foster_indices.get(&self.target) {
+            foster_storage.values[*index] = self.relation;
+        } else if let Some((old_target, index)) = foster_indices
             .iter()
             .next()
             .map(|(target, index)| (*target, *index))
-            .filter(|(target, _)| R::EXCLUSIVE && *target != self.target)
+            .filter(|_| R::EXCLUSIVE)
         {
             world
                 .get_entity_mut(old_target)
@@ -252,48 +257,32 @@ where
             foster_indices.clear();
             foster_indices.insert(self.target, index);
             foster_storage.values[index] = self.relation;
+            exclusive_overwrite = Some(old_target);
+        } else if let Some(mut target_edges) = world
+            .get_entity_mut(self.target)
+            .map(|mut target| target.take::<Edges>().unwrap_or_default())
+        {
+            foster_indices.insert(self.target, foster_storage.values.len());
+            foster_storage.values.push(self.relation);
 
-            // Do not pull `world.get_entity .. insert(..)` outside branch.
-            // Components need to exist on entity when cleanup code is called.
-            world
-                .get_entity_mut(self.foster)
-                .unwrap()
-                .insert((foster_edges, foster_storage));
-
-            // TODO: Cleanup
-            // old_target removed so call cleanup code here
-        } else {
-            if let Some(index) = foster_indices.get(&self.target) {
-                foster_storage.values[*index] = self.relation;
-            } else {
-                let Some(mut target_edges) = world
-                    .get_entity_mut(self.target)
-                    .map(|mut target| target.take::<Edges>().unwrap_or_default())
-                else {
-                    // TODO: Logging
-                    return
-                };
-
-                foster_indices.insert(self.target, foster_storage.values.len());
-                foster_storage.values.push(self.relation);
-
-                target_edges
-                    .fosters
-                    .entry(TypeId::of::<Storage<R>>())
-                    .or_default()
-                    .insert(self.foster);
-
-                world
-                    .get_entity_mut(self.target)
-                    .unwrap()
-                    .insert(target_edges);
-            }
+            target_edges
+                .fosters
+                .entry(TypeId::of::<Storage<R>>())
+                .or_default()
+                .insert(self.foster);
 
             world
-                .get_entity_mut(self.foster)
+                .get_entity_mut(self.target)
                 .unwrap()
-                .insert((foster_edges, foster_storage));
+                .insert(target_edges);
         }
+
+        world
+            .get_entity_mut(self.foster)
+            .unwrap()
+            .insert((foster_edges, foster_storage));
+
+        // TODO: Cleanup
     }
 }
 

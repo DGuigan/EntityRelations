@@ -10,13 +10,18 @@ use super::{tuple_traits::*, *};
 // O _ _: Left Join
 // O S _: Full left Join
 
-pub trait Joinable {}
+pub trait Joinable {
+    fn contains(&self, entity: Entity) -> bool;
+}
 
 impl<Q, F> Joinable for &'_ Query<'_, '_, Q, F>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
 {
+    fn contains(&self, entity: Entity) -> bool {
+        (**self).contains(entity)
+    }
 }
 
 impl<Q, F> Joinable for &'_ mut Query<'_, '_, Q, F>
@@ -24,149 +29,32 @@ where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
 {
-}
-
-//trait Check<Key> {}
-//trait Join<Key> {}
-
-pub trait Join<'j, Storage> {
-    type Out;
-    fn matches(&self, target: Entity) -> bool;
-    fn joined(&'j mut self, target_info: (Entity, usize), storage: &'j mut Storage) -> Self::Out;
-}
-
-impl<'j, Q, F> Join<'j, Wiped> for &'_ Query<'_, '_, Q, F>
-where
-    Q: 'static + WorldQuery,
-    F: 'static + ReadOnlyWorldQuery,
-{
-    type Out = <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'j>;
-
-    fn matches(&self, target: Entity) -> bool {
-        (**self).get(target).is_ok()
-    }
-
-    fn joined(
-        &'j mut self,
-        (target, _index): (Entity, usize),
-        _storage: &'j mut Wiped,
-    ) -> Self::Out {
-        (**self).get(target).unwrap()
+    fn contains(&self, entity: Entity) -> bool {
+        (**self).contains(entity)
     }
 }
 
-impl<'j, 'a, Q, F, R> Join<'j, &'a Storage<R>> for &'_ Query<'_, '_, Q, F>
-where
-    Q: 'static + WorldQuery,
-    F: 'static + ReadOnlyWorldQuery,
-    R: Relation,
-{
-    type Out = (&'j R, <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'j>);
-
-    fn matches(&self, target: Entity) -> bool {
-        (**self).get(target).is_ok()
-    }
-
-    fn joined(
-        &'j mut self,
-        (target, index): (Entity, usize),
-        storage: &'j mut &'a Storage<R>,
-    ) -> Self::Out {
-        (&storage.values[index], (**self).get(target).unwrap())
-    }
+trait Join<Key> {
+    fn join(&mut self, key: Key);
 }
 
-/*impl<'j, Q, F, R> Join<'j, StorageWorldQueryMut<R>> for &'_ Query<'_, '_, Q, F>
-where
-    Q: 'static + WorldQuery,
-    F: 'static + ReadOnlyWorldQuery,
-    R: Relation,
-{
-    type Out = (
-        &'j mut R,
-        <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'j>,
-    );
-
-    fn matches(&self, target: Entity) -> bool {
-        (**self).get(target).is_ok()
-    }
-
-    fn joined(
-        &'j mut self,
-        (target, index): (Entity, usize),
-        storage: &'j mut StorageWorldQueryMut<R>,
-    ) -> Self::Out {
-        (
-            &mut storage.storage.values[index],
-            (**self).get(target).unwrap(),
-        )
-    }
-}*/
-
-impl<'j, Q, F> Join<'j, Wiped> for &'_ mut Query<'_, '_, Q, F>
-where
-    Q: 'static + WorldQuery,
-    F: 'static + ReadOnlyWorldQuery,
-{
-    type Out = <Q as WorldQuery>::Item<'j>;
-
-    fn matches(&self, target: Entity) -> bool {
-        (**self).get(target).is_ok()
-    }
-
-    fn joined(
-        &'j mut self,
-        (target, _index): (Entity, usize),
-        _storage: &'j mut Wiped,
-    ) -> Self::Out {
-        (**self).get_mut(target).unwrap()
-    }
+trait ForAll<EdgeTypes, Storage> {
+    type In<'i>
+    where
+        Self: 'i;
+    fn for_all<Left, Func, Ret>(
+        &mut self,
+        edges: &Edges,
+        storage: Storage,
+        left: Left,
+        func: Func,
+    ) -> ControlFlow
+    where
+        Func: for<'l, 'i> FnMut(&'l mut Left, Self::In<'i>) -> Ret,
+        Ret: Into<ControlFlow>;
 }
 
-impl<'j, 'a, Q, F, R> Join<'j, &'a Storage<R>> for &'_ mut Query<'_, '_, Q, F>
-where
-    Q: 'static + WorldQuery,
-    F: 'static + ReadOnlyWorldQuery,
-    R: Relation,
-{
-    type Out = (&'j R, <Q as WorldQuery>::Item<'j>);
-
-    fn matches(&self, target: Entity) -> bool {
-        (**self).get(target).is_ok()
-    }
-
-    fn joined(
-        &'j mut self,
-        (target, index): (Entity, usize),
-        storage: &'j mut &'a Storage<R>,
-    ) -> Self::Out {
-        (&storage.values[index], (**self).get_mut(target).unwrap())
-    }
-}
-
-/*impl<'j, Q, F, R> Join<'j, StorageWorldQueryMut<R>> for &'_ mut Query<'_, '_, Q, F>
-where
-    Q: 'static + WorldQuery,
-    F: 'static + ReadOnlyWorldQuery,
-    R: Relation,
-{
-    type Out = (&'j R, <Q as WorldQuery>::Item<'j>);
-
-    fn matches(&self, target: Entity) -> bool {
-        (**self).get(target).is_ok()
-    }
-
-    fn joined(
-        &'j mut self,
-        (target, index): (Entity, usize),
-        storage: &'j mut StorageWorldQueryMut<R>,
-    ) -> Self::Out {
-        (
-            &mut storage.storage.values[index],
-            (**self).get_mut(target).unwrap(),
-        )
-    }
-}*/
+//impl ForAll<(I0,), (S0)> for Q0
 
 pub trait DeclarativeJoin<R, Joins, EdgeComb, StorageComb, Item, const POS: usize>
 where
@@ -328,7 +216,7 @@ where
     }
 }
 
-type RelationItem<'a, R> =
+/*type RelationItem<'a, R> =
     <<<R as RelationQuerySet>::WorldQuery as WorldQuery>::ReadOnly as WorldQuery>::Item<'a>;
 
 impl<E0, S0, J0, Q, R, F, Joins, EdgeComb, StorageComb> ForEachPermutations<(E0,), (S0,), (J0,)>
@@ -368,7 +256,7 @@ where
             }
         }
     }
-}
+}*/
 
 #[cfg(test)]
 #[allow(dead_code)]
@@ -402,7 +290,7 @@ mod compile_tests {
     struct E;
 
     fn join_immut(rq: Query<(&A, Relations<&B>)>, d: Query<&D>, e: Query<&E>) {
-        rq.ops().join::<B>(&e).for_each(|_| {});
+        //rq.ops().join::<B>(&e).for_each(|_| {});
     }
 
     /*fn join_left_mut(mut rq: Query<(&A, Relations<(&mut C, &mut B)>)>, d: Query<&D>, e: Query<&E>) {

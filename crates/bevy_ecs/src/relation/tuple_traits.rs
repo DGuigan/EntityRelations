@@ -1,15 +1,8 @@
-use super::{Edges, Relation, Storage};
+use super::{Relation, Storage};
 use crate::{
-    entity::Entity,
     query::{ReadOnlyWorldQuery, WorldQuery},
     system::Query,
 };
-use bevy_utils::hashbrown::hash_map::Iter as HashMapIter;
-use bevy_utils::HashMap;
-use std::any::TypeId;
-use std::iter::Flatten as FlatIter;
-use std::iter::Map;
-use std::option::IntoIter;
 
 // TODO: All tuple
 pub trait TypedSet<Types, Target, const POS: usize> {
@@ -69,13 +62,6 @@ impl<K0, K1, K2, P0, P1, P2> TypedSet<(K0, K1, K2), K2, 2> for (P0, P1, P2) {
 pub trait Append {
     type Out<Item>: Append;
     fn append<Item>(self, item: Item) -> Self::Out<Item>;
-}
-
-impl<'a, T> Append for &'a T {
-    type Out<Item> = (&'a T, Item);
-    fn append<Item>(self, item: Item) -> Self::Out<Item> {
-        (self, item)
-    }
 }
 
 impl Append for () {
