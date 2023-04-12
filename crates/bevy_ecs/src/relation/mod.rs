@@ -41,7 +41,7 @@ use sealed::*;
 // - Cleanup code can just remove entites without knowing relation type
 // - Need manual WorldQuery impl that hides this archetype access
 // - Uphold invariants to ensure soundness
-pub struct Storage<R: Relation> {
+pub(crate) struct Storage<R: Relation> {
     pub(crate) values: SmallVec<[R; 1]>,
 }
 
@@ -193,15 +193,16 @@ impl From<()> for ControlFlow {
     }
 }
 
-// It is nessecary to pass the tuples back into the trait itself
-// otherwise we get mysterious HRTB errors about impls on FnOnce not being general enough
-pub trait ForEachPermutations<EdgeTup, StorageTup, JoinTup> {
-    type Components<'a>;
-    //type Joins<'a>;
-    fn for_each<Func, Ret>(self, func: Func)
+pub trait ForEachPermutations {
+    type Components<'c>;
+    type Joins<'i, 'a, 'j>;
+    fn for_each_p<Func, Ret>(self, func: Func)
     where
         Ret: Into<ControlFlow>,
-        Func: for<'a> FnMut(&mut Self::Components<'a> /*, Self::Joins<'a>*/) -> Ret;
+        Func: for<'r, 'c, 'i, 'a, 'j> FnMut(
+            &'r mut Self::Components<'c>,
+            Self::Joins<'i, 'a, 'j>,
+        ) -> Ret;
 }
 
 pub struct Set<R>
