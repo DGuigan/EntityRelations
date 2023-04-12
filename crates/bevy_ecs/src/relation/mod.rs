@@ -196,7 +196,7 @@ impl From<()> for ControlFlow {
 pub trait ForEachPermutations {
     type Components<'c>;
     type Joins<'i, 'a, 'j>;
-    fn for_each_p<Func, Ret>(self, func: Func)
+    fn for_each<Func, Ret>(self, func: Func)
     where
         Ret: Into<ControlFlow>,
         Func: for<'r, 'c, 'i, 'a, 'j> FnMut(
