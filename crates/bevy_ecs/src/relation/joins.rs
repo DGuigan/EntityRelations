@@ -217,7 +217,7 @@ where
             joins: self.joins.set(item),
             edge_comb: PhantomData,
             storage_comb: PhantomData,
-            traversal: PhantomData,
+            traversal: self.traversal,
         }
     }
 
@@ -232,7 +232,7 @@ where
             joins: self.joins.set(item),
             edge_comb: PhantomData,
             storage_comb: PhantomData,
-            traversal: PhantomData,
+            traversal: self.traversal,
         }
     }
 }
@@ -282,7 +282,7 @@ where
             joins: self.joins.set(item),
             edge_comb: PhantomData,
             storage_comb: PhantomData,
-            traversal: PhantomData,
+            traversal: self.traversal,
         }
     }
 
@@ -297,21 +297,10 @@ where
             joins: self.joins.set(item),
             edge_comb: PhantomData,
             storage_comb: PhantomData,
-            traversal: PhantomData,
+            traversal: self.traversal,
         }
     }
 }
-
-#[rustfmt::skip]
-type RelationItem<'a, R> = <<<R as RelationQuerySet>
-    ::WorldQuery as WorldQuery>
-    ::ReadOnly as WorldQuery>
-    ::Item<'a>;
-
-#[rustfmt::skip]
-type RelationItemMut<'a, R> = <<R as RelationQuerySet>
-    ::WorldQuery as WorldQuery>
-    ::Item<'a>;
 
 impl<E0, Q, R, F, Joins, EdgeComb, StorageComb> ForEachPermutations
     for Ops<&'_ Query<'_, '_, (Q, Relations<R>), F>, Joins, EdgeComb, StorageComb>

@@ -15,12 +15,12 @@ use crate::{
 };
 
 mod joins;
+mod traversals;
 mod tuple_traits;
-//mod traversals;
 
 pub use joins::*;
+pub use traversals::*;
 pub use tuple_traits::*;
-//pub use traversals::*;
 
 mod sealed {
     use super::*;
@@ -152,7 +152,7 @@ pub struct Ops<Query, Joins, EdgeComb, StorageComb, Traversal = ()> {
     joins: Joins,
     edge_comb: PhantomData<EdgeComb>,
     storage_comb: PhantomData<StorageComb>,
-    traversal: PhantomData<Traversal>,
+    traversal: Traversal,
 }
 
 impl<'w, 's, Q, F, R> Query<'w, 's, (Q, Relations<R>), F>
@@ -167,7 +167,7 @@ where
             joins: R::ColsWith::<()>::default(),
             edge_comb: PhantomData,
             storage_comb: PhantomData,
-            traversal: PhantomData,
+            traversal: (),
         }
     }
 
@@ -177,7 +177,7 @@ where
             joins: R::ColsWith::<()>::default(),
             edge_comb: PhantomData,
             storage_comb: PhantomData,
-            traversal: PhantomData,
+            traversal: (),
         }
     }
 }
@@ -192,6 +192,17 @@ impl From<()> for ControlFlow {
         ControlFlow::Continue
     }
 }
+
+#[rustfmt::skip]
+type RelationItem<'a, R> = <<<R as RelationQuerySet>
+    ::WorldQuery as WorldQuery>
+    ::ReadOnly as WorldQuery>
+    ::Item<'a>;
+
+#[rustfmt::skip]
+type RelationItemMut<'a, R> = <<R as RelationQuerySet>
+    ::WorldQuery as WorldQuery>
+    ::Item<'a>;
 
 pub trait ForEachPermutations {
     type Components<'c>;

@@ -173,7 +173,7 @@ where
 trait NoFlatten {}
 
 impl NoFlatten for Wiped {}
-impl<T> NoFlatten for Option<T> {}
+impl<T: NoFlatten> NoFlatten for Option<T> {}
 impl<R: Relation> NoFlatten for R {}
 impl<R: Relation> NoFlatten for StorageWorldQueryItem<'_, R> {}
 impl<R: Relation> NoFlatten for StorageWorldQueryMutItem<'_, R> {}
