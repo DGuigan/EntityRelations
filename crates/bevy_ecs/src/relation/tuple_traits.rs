@@ -1,4 +1,4 @@
-use super::{Relation, Storage};
+use super::*;
 use crate::{
     query::{ReadOnlyWorldQuery, WorldQuery},
     system::Query,
@@ -173,6 +173,11 @@ where
 trait NoFlatten {}
 
 impl NoFlatten for Wiped {}
+impl<T> NoFlatten for Option<T> {}
+impl<R: Relation> NoFlatten for R {}
+impl<R: Relation> NoFlatten for StorageWorldQueryItem<'_, R> {}
+impl<R: Relation> NoFlatten for StorageWorldQueryMutItem<'_, R> {}
+
 impl<Q, F> NoFlatten for &'_ Query<'_, '_, Q, F>
 where
     Q: 'static + WorldQuery,
@@ -186,9 +191,6 @@ where
     F: 'static + ReadOnlyWorldQuery,
 {
 }
-
-impl<R: Relation> NoFlatten for R {}
-impl<R: Relation> NoFlatten for Storage<R> {}
 
 pub trait Flatten<Flattened: Append> {
     type Out: Append;
