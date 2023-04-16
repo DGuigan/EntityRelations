@@ -1,256 +1,390 @@
-use std::collections::VecDeque;
-
+use super::{joins::*, *};
 use crate::{
-    change_detection::Mut,
     entity::Entity,
     query::{ReadOnlyWorldQuery, WorldQuery},
-    relation::{joins::*, lenses::*, *},
     system::Query,
 };
+use std::collections::VecDeque;
 
-pub trait Queue<Edges>: Default {
-    fn new(start: Entity) -> Self;
-    fn enqueue_back(&mut self, items: &Edges);
-    fn take_next(&mut self) -> Option<Entity>;
+pub struct BreadthFirst<R: Relation> {
+    start: Entity,
+    _phantom: PhantomData<R>,
 }
 
-impl<'a, T, Edges> Queue<Option<&'a Edges>> for T
-where
-    T: for<'x> Queue<&'x Edges>,
-{
-    fn new(start: Entity) -> Self {
-        T::new(start)
-    }
-
-    fn enqueue_back(&mut self, items: &Option<&'a Edges>) {
-        if let Some(items) = items {
-            T::enqueue_back(self, items)
-        }
-    }
-
-    fn take_next(&mut self) -> Option<Entity> {
-        T::take_next(self)
-    }
-}
-
-impl<'a, T, Edges> Queue<Option<Mut<'a, Edges>>> for T
-where
-    T: for<'x> Queue<&'x Edges>,
-{
-    fn new(start: Entity) -> Self {
-        T::new(start)
-    }
-
-    fn enqueue_back(&mut self, items: &Option<Mut<'a, Edges>>) {
-        if let Some(items) = items {
-            T::enqueue_back(self, &&**items)
-        }
-    }
-
-    fn take_next(&mut self) -> Option<Entity> {
-        T::take_next(self)
-    }
-}
-
-impl<Edges, T> Queue<Mut<'_, Edges>> for T
-where
-    T: for<'a> Queue<&'a Edges>,
-{
-    fn new(start: Entity) -> Self {
-        T::new(start)
-    }
-
-    fn enqueue_back(&mut self, items: &Mut<'_, Edges>) {
-        T::enqueue_back(self, &&*items.value)
-    }
-
-    fn take_next(&mut self) -> Option<Entity> {
-        T::take_next(self)
-    }
-}
-
-impl<R> Queue<&Exclusive<R>> for Option<Entity> {
-    fn new(start: Entity) -> Self {
-        Some(start)
-    }
-
-    fn enqueue_back(&mut self, items: &&Exclusive<R>) {
-        *self = Some(items.0)
-    }
-
-    fn take_next(&mut self) -> Option<Entity> {
-        self.take()
-    }
-}
-
-impl<R> Queue<&Multi<R>> for VecDeque<Entity> {
-    fn new(start: Entity) -> Self {
-        VecDeque::from([start])
-    }
-
-    fn enqueue_back(&mut self, items: &&Multi<R>) {
-        items.0.keys().for_each(|key| self.push_back(*key))
-    }
-
-    fn take_next(&mut self) -> Option<Entity> {
-        self.pop_front()
-    }
-}
-
-pub struct BreadthFirstTraversal<LensIn, LensOut> {
-    lens: fn(&LensIn) -> &LensOut,
-}
-
-type LensOut<In, R, T, const POS: usize> = <In as TypedGet<<R as RelationSet>::Types, T, POS>>::Out;
-type OptimalQueue<T> = <<T as Relation>::Arity as RelationArity<T>>::OptimalQueue;
-
-pub trait BreadthFrist<R, LensIn, const POS: usize>
-where
-    R: RelationSet,
-{
-    type Out<T>
-    where
-        T: Relation,
-        LensIn: TypedGet<R::Types, T, POS>;
-
-    fn breadth_first<T>(self, start: Entity) -> Self::Out<T>
-    where
-        T: Relation,
-        LensIn: TypedGet<R::Types, T, POS>,
-        OptimalQueue<T>: Queue<LensOut<LensIn, R, T, POS>>;
-}
-
-impl<'o, 'w, 's, Q, F, R, Joins, const POS: usize> BreadthFrist<R, FetchItem<'o, R>, POS>
-    for Ops<&'o Query<'w, 's, (Q, Relations<R>), F>, Joins>
-where
-    Q: 'static + WorldQuery,
-    F: 'static + ReadOnlyWorldQuery,
-    R: RelationSet + Send + Sync,
-{
-    type Out<T> = Ops<
-        &'o Query<'w, 's, (Q, Relations<R>), F>,
-        Joins,
-        BreadthFirstTraversal<FetchItem<'o, R>, LensOut<FetchItem<'o, R>, R, T, POS>>,
-        OptimalQueue<T>,
-    >
-    where
-        T: Relation,
-        FetchItem<'o, R>: TypedGet<R::Types, T, POS>;
-
-    fn breadth_first<T>(self, start: Entity) -> Self::Out<T>
-    where
-        T: Relation,
-        FetchItem<'o, R>: TypedGet<R::Types, T, POS>,
-        OptimalQueue<T>: Queue<LensOut<FetchItem<'o, R>, R, T, POS>>,
-    {
-        let lens = <FetchItem<'o, R> as TypedGet<R::Types, T, POS>>::getter;
-        let queue = OptimalQueue::<T>::new(start);
-
+impl<Query, Joins, EdgeComb, StorageComb> Ops<Query, Joins, EdgeComb, StorageComb> {
+    fn breadth_first<R: Relation>(
+        self,
+        start: Entity,
+    ) -> Ops<Query, Joins, EdgeComb, StorageComb, BreadthFirst<R>> {
         Ops {
             query: self.query,
             joins: self.joins,
-            traversal: BreadthFirstTraversal { lens },
-            queue,
+            edge_comb: self.edge_comb,
+            storage_comb: self.storage_comb,
+            traversal: BreadthFirst {
+                start,
+                _phantom: PhantomData,
+            },
         }
     }
 }
 
-impl<'o, 'w, 's, Q, F, R, Joins, const POS: usize> BreadthFrist<R, FetchItemMut<'o, R>, POS>
-    for Ops<&'o mut Query<'w, 's, (Q, Relations<R>), F>, Joins>
+impl<T, Q, R, F, Joins, EdgeComb, StorageComb> ForEachPermutations
+    for Ops<&'_ Query<'_, '_, (Q, Relations<R>), F>, Joins, EdgeComb, StorageComb, BreadthFirst<T>>
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
-    R: RelationSet + Send + Sync,
+    R: RelationQuerySet,
+    T: Relation,
+    EdgeComb: Comb<R::Types>,
+    <EdgeComb as Comb<R::Types>>::Out: Flatten<(), Out = ()>,
 {
-    type Out<T> = Ops<
-        &'o mut Query<'w, 's, (Q, Relations<R>), F>,
-        Joins,
-        BreadthFirstTraversal<FetchItemMut<'o, R>, LensOut<FetchItemMut<'o, R>, R, T, POS>>,
-        OptimalQueue<T>,
-    >
-    where
-        T: Relation,
-        FetchItemMut<'o, R>: TypedGet<R::Types, T, POS>;
+    type Components<'c> = <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'c>;
+    type Joins<'i, 'a, 'j> = ();
 
-    fn breadth_first<T>(self, start: Entity) -> Self::Out<T>
+    fn for_each<Func, Ret>(self, mut func: Func)
     where
-        T: Relation,
-        FetchItemMut<'o, R>: TypedGet<R::Types, T, POS>,
-        OptimalQueue<T>: Queue<LensOut<FetchItemMut<'o, R>, R, T, POS>>,
+        Ret: Into<ControlFlow>,
+        Func: for<'r, 'c, 'i, 'a, 'j> FnMut(
+            &'r mut Self::Components<'c>,
+            Self::Joins<'i, 'a, 'j>,
+        ) -> Ret,
     {
-        let lens = <FetchItemMut<'o, R> as TypedGet<R::Types, T, POS>>::getter;
-        let queue = OptimalQueue::<T>::new(start);
+        let mut queue = VecDeque::from([self.traversal.start]);
 
-        Ops {
-            query: self.query,
-            joins: self.joins,
-            traversal: BreadthFirstTraversal { lens },
-            queue,
+        while let Some((mut components, relations)) =
+            queue.pop_front().and_then(|e| self.query.get(e).ok())
+        {
+            for (e, _) in relations.edges.iter::<T>() {
+                queue.push_back(e)
+            }
+
+            if let ControlFlow::Exit = func(&mut components, ()).into() {
+                return;
+            }
         }
     }
 }
 
-impl<'o, 'w, 's, Q, F, R, Joins, Edges, TraversalQueue> LendingForEach
+impl<T, Q, R, F, Joins, EdgeComb, StorageComb> ForEachPermutations
     for Ops<
-        &'o Query<'w, 's, (Q, Relations<R>), F>,
+        &'_ mut Query<'_, '_, (Q, Relations<R>), F>,
         Joins,
-        BreadthFirstTraversal<FetchItem<'o, R>, Edges>,
-        TraversalQueue,
+        EdgeComb,
+        StorageComb,
+        BreadthFirst<T>,
     >
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
-    R: RelationSet + Send + Sync,
-    TraversalQueue: Queue<Edges>,
-    for<'e, 'j> Joins: Joined<'j, FetchItem<'e, R>>,
+    R: RelationQuerySet,
+    T: Relation,
+    EdgeComb: Comb<R::Types>,
+    <EdgeComb as Comb<R::Types>>::Out: Flatten<(), Out = ()>,
 {
-    type In<'e, 'j> = (
-        <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'o>,
-        <Joins as Joined<'j, FetchItem<'o, R>>>::Out,
-    );
+    type Components<'c> = <Q as WorldQuery>::Item<'c>;
+    type Joins<'i, 'a, 'j> = ();
 
-    fn for_each(mut self, mut func: impl FnMut(Self::In<'_, '_>)) {
-        while let Some((q, r)) = self
-            .queue
-            .take_next()
-            .and_then(|entity| self.query.get(entity).ok())
+    fn for_each<Func, Ret>(self, mut func: Func)
+    where
+        Ret: Into<ControlFlow>,
+        Func: for<'r, 'c, 'i, 'a, 'j> FnMut(
+            &'r mut Self::Components<'c>,
+            Self::Joins<'i, 'a, 'j>,
+        ) -> Ret,
+    {
+        let mut queue = VecDeque::from([self.traversal.start]);
+
+        while let Some((mut components, relations)) =
+            queue.pop_front().and_then(|e| self.query.get_mut(e).ok())
         {
-            let edges = (self.traversal.lens)(&r.world_query);
-            self.queue.enqueue_back(edges);
-            func((q, self.joins.joined(r.world_query)));
+            for (e, _) in relations.edges.iter::<T>() {
+                queue.push_back(e)
+            }
+
+            if let ControlFlow::Exit = func(&mut components, ()).into() {
+                return;
+            }
         }
     }
 }
 
-impl<'o, 'w, 's, Q, F, R, Joins, Edges, TraversalQueue> LendingForEach
+impl<T, E0, Q, R, F, Joins, EdgeComb, StorageComb> ForEachPermutations
+    for Ops<&'_ Query<'_, '_, (Q, Relations<R>), F>, Joins, EdgeComb, StorageComb, BreadthFirst<T>>
+where
+    Q: 'static + WorldQuery,
+    F: 'static + ReadOnlyWorldQuery,
+    R: RelationQuerySet,
+    T: Relation,
+    E0: Relation,
+    EdgeComb: Comb<R::Types>,
+    <EdgeComb as Comb<R::Types>>::Out: Flatten<(), Out = (E0,)>,
+    Joins: Flatten<()>,
+    for<'j> <Joins as Flatten<()>>::Out: Joinable<'j, (Entity,), (bool,)>,
+    for<'i> StorageComb: Comb<RelationItem<'i, R>>,
+    for<'i> <StorageComb as Comb<RelationItem<'i, R>>>::Out: Flatten<()>,
+    for<'i, 'a, 'j> <<StorageComb as Comb<RelationItem<'i, R>>>::Out as Flatten<()>>::Out: Attach<
+        'a,
+        (usize,),
+        <<Joins as Flatten<()>>::Out as Joinable<'j, (Entity,), (bool,)>>::Out,
+    >,
+{
+    type Components<'c> = <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'c>;
+    type Joins<'i, 'a, 'j> =
+        <<<StorageComb as Comb<RelationItem<'i, R>>>::Out as Flatten<()>>::Out as Attach<
+            'a,
+            (usize,),
+            <<Joins as Flatten<()>>::Out as Joinable<'j, (Entity,), (bool,)>>::Out,
+        >>::Out;
+
+    fn for_each<Func, Ret>(self, mut func: Func)
+    where
+        Ret: Into<ControlFlow>,
+        Func: for<'r, 'c, 'i, 'a, 'j> FnMut(
+            &'r mut Self::Components<'c>,
+            Self::Joins<'i, 'a, 'j>,
+        ) -> Ret,
+    {
+        let mut joins = self.joins.flatten(());
+        let mut queue = VecDeque::from([self.traversal.start]);
+
+        while let Some((mut components, relations)) =
+            queue.pop_front().and_then(|e| self.query.get(e).ok())
+        {
+            for (e, _) in relations.edges.iter::<T>() {
+                queue.push_back(e)
+            }
+
+            let mut storage = StorageComb::comb(relations.world_query).flatten(());
+            'l0: for (e0, i0) in relations.edges.iter::<E0>() {
+                let (m0,) = joins.contains((e0,));
+                if !m0 {
+                    continue 'l0;
+                }
+                if let ControlFlow::Exit =
+                    func(&mut components, storage.attach((i0,), joins.get((e0,)))).into()
+                {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+impl<T, E0, E1, Q, R, F, Joins, EdgeComb, StorageComb> ForEachPermutations
+    for Ops<&'_ Query<'_, '_, (Q, Relations<R>), F>, Joins, EdgeComb, StorageComb, BreadthFirst<T>>
+where
+    Q: 'static + WorldQuery,
+    F: 'static + ReadOnlyWorldQuery,
+    R: RelationQuerySet,
+    T: Relation,
+    E0: Relation,
+    E1: Relation,
+    EdgeComb: Comb<R::Types>,
+    <EdgeComb as Comb<R::Types>>::Out: Flatten<(), Out = (E0, E1)>,
+    Joins: Flatten<()>,
+    for<'j> <Joins as Flatten<()>>::Out: Joinable<'j, (Entity, Entity), (bool, bool)>,
+    for<'i> StorageComb: Comb<RelationItem<'i, R>>,
+    for<'i> <StorageComb as Comb<RelationItem<'i, R>>>::Out: Flatten<()>,
+    for<'i, 'a, 'j> <<StorageComb as Comb<RelationItem<'i, R>>>::Out as Flatten<()>>::Out: Attach<
+        'a,
+        (usize, usize),
+        <<Joins as Flatten<()>>::Out as Joinable<'j, (Entity, Entity), (bool, bool)>>::Out,
+    >,
+{
+    type Components<'c> = <<Q as WorldQuery>::ReadOnly as WorldQuery>::Item<'c>;
+    type Joins<'i, 'a, 'j> =
+        <<<StorageComb as Comb<RelationItem<'i, R>>>::Out as Flatten<()>>::Out as Attach<
+            'a,
+            (usize, usize),
+            <<Joins as Flatten<()>>::Out as Joinable<'j, (Entity, Entity), (bool, bool)>>::Out,
+        >>::Out;
+
+    fn for_each<Func, Ret>(self, mut func: Func)
+    where
+        Ret: Into<ControlFlow>,
+        Func: for<'r, 'c, 'i, 'a, 'j> FnMut(
+            &'r mut Self::Components<'c>,
+            Self::Joins<'i, 'a, 'j>,
+        ) -> Ret,
+    {
+        let mut joins = self.joins.flatten(());
+        let mut queue = VecDeque::from([self.traversal.start]);
+
+        while let Some((mut components, relations)) =
+            queue.pop_front().and_then(|e| self.query.get(e).ok())
+        {
+            for (e, _) in relations.edges.iter::<T>() {
+                queue.push_back(e)
+            }
+
+            let mut storage = StorageComb::comb(relations.world_query).flatten(());
+            'l0: for (e0, i0) in relations.edges.iter::<E0>() {
+                'l1: for (e1, i1) in relations.edges.iter::<E1>() {
+                    let (m0, m1) = joins.contains((e0, e1));
+                    if !m0 {
+                        continue 'l0;
+                    }
+                    if !m1 {
+                        continue 'l1;
+                    }
+                    if let ControlFlow::Exit = func(
+                        &mut components,
+                        storage.attach((i0, i1), joins.get((e0, e1))),
+                    )
+                    .into()
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<T, E0, Q, R, F, Joins, EdgeComb, StorageComb> ForEachPermutations
     for Ops<
-        &'o mut Query<'w, 's, (Q, Relations<R>), F>,
+        &'_ mut Query<'_, '_, (Q, Relations<R>), F>,
         Joins,
-        BreadthFirstTraversal<FetchItemMut<'o, R>, Edges>,
-        TraversalQueue,
+        EdgeComb,
+        StorageComb,
+        BreadthFirst<T>,
     >
 where
     Q: 'static + WorldQuery,
     F: 'static + ReadOnlyWorldQuery,
-    R: RelationSet + Send + Sync,
-    TraversalQueue: Queue<Edges>,
-    for<'e, 'j> Joins: Joined<'j, FetchItemMut<'e, R>>,
+    R: RelationQuerySet,
+    T: Relation,
+    E0: Relation,
+    EdgeComb: Comb<R::Types>,
+    <EdgeComb as Comb<R::Types>>::Out: Flatten<(), Out = (E0,)>,
+    Joins: Flatten<()>,
+    for<'j> <Joins as Flatten<()>>::Out: Joinable<'j, (Entity,), (bool,)>,
+    for<'i> StorageComb: Comb<RelationItemMut<'i, R>>,
+    for<'i> <StorageComb as Comb<RelationItemMut<'i, R>>>::Out: Flatten<()>,
+    for<'i, 'a, 'j> <<StorageComb as Comb<RelationItemMut<'i, R>>>::Out as Flatten<()>>::Out:
+        Attach<
+            'a,
+            (usize,),
+            <<Joins as Flatten<()>>::Out as Joinable<'j, (Entity,), (bool,)>>::Out,
+        >,
 {
-    type In<'e, 'j> = (
-        <Q as WorldQuery>::Item<'e>,
-        <Joins as Joined<'j, FetchItemMut<'e, R>>>::Out,
-    );
+    type Components<'c> = <Q as WorldQuery>::Item<'c>;
+    type Joins<'i, 'a, 'j> =
+        <<<StorageComb as Comb<RelationItemMut<'i, R>>>::Out as Flatten<()>>::Out as Attach<
+            'a,
+            (usize,),
+            <<Joins as Flatten<()>>::Out as Joinable<'j, (Entity,), (bool,)>>::Out,
+        >>::Out;
 
-    fn for_each(mut self, mut func: impl FnMut(Self::In<'_, '_>)) {
-        while let Some((q, r)) = self
-            .queue
-            .take_next()
-            // Safety: Is always safe becase input cannot escape closure
-            .and_then(|entity| unsafe { self.query.get_unchecked(entity).ok() })
+    fn for_each<Func, Ret>(self, mut func: Func)
+    where
+        Ret: Into<ControlFlow>,
+        Func: for<'r, 'c, 'i, 'a, 'j> FnMut(
+            &'r mut Self::Components<'c>,
+            Self::Joins<'i, 'a, 'j>,
+        ) -> Ret,
+    {
+        let mut joins = self.joins.flatten(());
+        let mut queue = VecDeque::from([self.traversal.start]);
+
+        while let Some((mut components, relations)) =
+            queue.pop_front().and_then(|e| self.query.get_mut(e).ok())
         {
-            let edges = (self.traversal.lens)(&r.world_query);
-            self.queue.enqueue_back(edges);
-            func((q, self.joins.joined(r.world_query)));
+            for (e, _) in relations.edges.iter::<T>() {
+                queue.push_back(e)
+            }
+
+            let mut storage = StorageComb::comb(relations.world_query).flatten(());
+            'l0: for (e0, i0) in relations.edges.iter::<E0>() {
+                let (m0,) = joins.contains((e0,));
+                if !m0 {
+                    continue 'l0;
+                }
+                if let ControlFlow::Exit =
+                    func(&mut components, storage.attach((i0,), joins.get((e0,)))).into()
+                {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+impl<T, E0, E1, Q, R, F, Joins, EdgeComb, StorageComb> ForEachPermutations
+    for Ops<
+        &'_ mut Query<'_, '_, (Q, Relations<R>), F>,
+        Joins,
+        EdgeComb,
+        StorageComb,
+        BreadthFirst<T>,
+    >
+where
+    Q: 'static + WorldQuery,
+    F: 'static + ReadOnlyWorldQuery,
+    R: RelationQuerySet,
+    T: Relation,
+    E0: Relation,
+    E1: Relation,
+    EdgeComb: Comb<R::Types>,
+    <EdgeComb as Comb<R::Types>>::Out: Flatten<(), Out = (E0, E1)>,
+    Joins: Flatten<()>,
+    for<'j> <Joins as Flatten<()>>::Out: Joinable<'j, (Entity, Entity), (bool, bool)>,
+    for<'i> StorageComb: Comb<RelationItemMut<'i, R>>,
+    for<'i> <StorageComb as Comb<RelationItemMut<'i, R>>>::Out: Flatten<()>,
+    for<'i, 'a, 'j> <<StorageComb as Comb<RelationItemMut<'i, R>>>::Out as Flatten<()>>::Out:
+        Attach<
+            'a,
+            (usize, usize),
+            <<Joins as Flatten<()>>::Out as Joinable<'j, (Entity, Entity), (bool, bool)>>::Out,
+        >,
+{
+    type Components<'c> = <Q as WorldQuery>::Item<'c>;
+    type Joins<'i, 'a, 'j> =
+        <<<StorageComb as Comb<RelationItemMut<'i, R>>>::Out as Flatten<()>>::Out as Attach<
+            'a,
+            (usize, usize),
+            <<Joins as Flatten<()>>::Out as Joinable<'j, (Entity, Entity), (bool, bool)>>::Out,
+        >>::Out;
+
+    fn for_each<Func, Ret>(self, mut func: Func)
+    where
+        Ret: Into<ControlFlow>,
+        Func: for<'r, 'c, 'i, 'a, 'j> FnMut(
+            &'r mut Self::Components<'c>,
+            Self::Joins<'i, 'a, 'j>,
+        ) -> Ret,
+    {
+        let mut joins = self.joins.flatten(());
+        let mut queue = VecDeque::from([self.traversal.start]);
+
+        while let Some((mut components, relations)) =
+            queue.pop_front().and_then(|e| self.query.get_mut(e).ok())
+        {
+            for (e, _) in relations.edges.iter::<T>() {
+                queue.push_back(e)
+            }
+
+            let mut storage = StorageComb::comb(relations.world_query).flatten(());
+            'l0: for (e0, i0) in relations.edges.iter::<E0>() {
+                'l1: for (e1, i1) in relations.edges.iter::<E1>() {
+                    let (m0, m1) = joins.contains((e0, e1));
+                    if !m0 {
+                        continue 'l0;
+                    }
+                    if !m1 {
+                        continue 'l1;
+                    }
+                    if let ControlFlow::Exit = func(
+                        &mut components,
+                        storage.attach((i0, i1), joins.get((e0, e1))),
+                    )
+                    .into()
+                    {
+                        return;
+                    }
+                }
+            }
         }
     }
 }
@@ -275,76 +409,79 @@ mod compile_tests {
     struct D;
 
     impl Relation for B {
-        type Arity = Multi<Self>;
         type Storage = TableStorage;
     }
 
     impl Relation for C {
-        type Arity = Exclusive<Self>;
         type Storage = TableStorage;
     }
 
-    #[derive(Component)]
-    struct E;
+    fn no_join(left: Query<(&A, Relations<&B>)>, start: Entity) {
+        left.ops().breadth_first::<B>(start).for_each(|a, _| {})
+    }
 
-    fn breadth_first_immut(rq: Query<(&A, Relations<(&C, &B)>)>, d: Query<&D>, entity: Entity) {
-        rq.ops()
+    fn no_join_mut(mut left: Query<(&A, Relations<&B>)>, start: Entity) {
+        left.ops_mut().breadth_first::<B>(start).for_each(|a, _| {})
+    }
+
+    fn breadth_first_immut(left: Query<(&A, Relations<(&B, &C)>)>, d: Query<&D>, entity: Entity) {
+        left.ops()
             .join::<B>(&d)
             .breadth_first::<C>(entity)
-            .for_each(|_| {});
+            .for_each(|a, (d,)| {});
 
-        rq.ops()
-            .join::<C>(&d)
-            .breadth_first::<B>(entity)
-            .for_each(|_| {});
+        left.ops()
+            .total_join::<B>(&d)
+            .breadth_first::<C>(entity)
+            .for_each(|a, ((b, d),)| {});
     }
 
     fn breadth_first_mut(
-        mut rq: Query<(&A, Relations<(&mut C, &mut B)>)>,
+        mut left: Query<(&A, Relations<(&mut B, &mut C)>)>,
         d: Query<&D>,
         entity: Entity,
     ) {
-        rq.ops_mut()
+        left.ops_mut()
             .join::<B>(&d)
             .breadth_first::<C>(entity)
-            .for_each(|_| {});
+            .for_each(|a, (d,)| {});
 
-        rq.ops_mut()
-            .join::<C>(&d)
-            .breadth_first::<B>(entity)
-            .for_each(|_| {});
+        left.ops_mut()
+            .total_join::<B>(&d)
+            .breadth_first::<C>(entity)
+            .for_each(|a, ((b, d),)| {});
     }
 
     fn breadth_first_immut_optional(
-        rq: Query<(&A, Relations<(Option<&C>, Option<&B>)>)>,
+        left: Query<(&A, Relations<(Option<&B>, Option<&C>)>)>,
         d: Query<&D>,
         entity: Entity,
     ) {
-        rq.ops()
+        left.ops()
             .join::<B>(&d)
             .breadth_first::<C>(entity)
-            .for_each(|_| {});
+            .for_each(|a, (d,)| {});
 
-        rq.ops()
-            .join::<C>(&d)
-            .breadth_first::<B>(entity)
-            .for_each(|_| {});
+        left.ops()
+            .total_join::<B>(&d)
+            .breadth_first::<C>(entity)
+            .for_each(|a, ((b, d),)| {});
     }
 
     fn breadth_first_mut_optional(
-        mut rq: Query<(&A, Relations<(Option<&mut C>, Option<&mut B>)>)>,
+        mut left: Query<(&A, Relations<(Option<&mut B>, Option<&mut C>)>)>,
         d: Query<&D>,
         entity: Entity,
     ) {
-        rq.ops_mut()
+        left.ops_mut()
             .join::<B>(&d)
             .breadth_first::<C>(entity)
-            .for_each(|_| {});
+            .for_each(|a, (d,)| {});
 
-        rq.ops_mut()
-            .join::<C>(&d)
-            .breadth_first::<B>(entity)
-            .for_each(|_| {});
+        left.ops_mut()
+            .join::<B>(&d)
+            .breadth_first::<C>(entity)
+            .for_each(|a, (d,)| {});
     }
 }
 
@@ -353,14 +490,9 @@ mod unit_tests {
     use super::*;
     use crate::{self as bevy_ecs, component::TableStorage, prelude::*};
 
-    #[derive(StageLabel)]
-    struct UpdateStage;
-
     fn run_system<Param, S: IntoSystem<(), (), Param>>(world: &mut World, system: S) {
         let mut schedule = Schedule::default();
-        let mut update = SystemStage::parallel();
-        update.add_system(system);
-        schedule.add_stage(UpdateStage, update);
+        schedule.add_systems(system);
         schedule.run(world);
     }
 
@@ -376,7 +508,6 @@ mod unit_tests {
     struct Child;
 
     impl Relation for Child {
-        type Arity = Multi<Self>;
         type Storage = TableStorage;
     }
 
@@ -419,7 +550,7 @@ mod unit_tests {
         positions
             .ops_mut()
             .breadth_first::<Child>(root.get_single().unwrap())
-            .for_each(|(mut pos, _)| pos.x = 0);
+            .for_each(|pos, _| pos.x = 0);
 
         assert!(positions.iter().all(|(pos, _)| *pos == Pos { x: 0, y: 5 }));
     }

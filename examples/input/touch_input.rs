@@ -5,7 +5,7 @@ use bevy::{input::touch::*, prelude::*};
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_system(touch_system)
+        .add_systems(Update, touch_system)
         .run();
 }
 
@@ -26,7 +26,7 @@ fn touch_system(touches: Res<Touches>) {
         );
     }
 
-    for touch in touches.iter_just_cancelled() {
+    for touch in touches.iter_just_canceled() {
         info!("cancelled touch with id: {:?}", touch.id());
     }
 

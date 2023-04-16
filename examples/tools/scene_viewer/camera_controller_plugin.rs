@@ -91,7 +91,7 @@ pub struct CameraControllerPlugin;
 
 impl Plugin for CameraControllerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_system(camera_controller);
+        app.add_systems(Update, camera_controller);
     }
 }
 
@@ -177,7 +177,8 @@ fn camera_controller(
             for mouse_event in mouse_events.iter() {
                 mouse_delta += mouse_event.delta;
             }
-        } else {
+        }
+        if mouse_button_input.just_released(options.mouse_key_enable_mouse) {
             for mut window in &mut windows {
                 window.cursor.grab_mode = CursorGrabMode::None;
                 window.cursor.visible = true;
