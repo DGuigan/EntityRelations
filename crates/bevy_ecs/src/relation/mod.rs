@@ -1,4 +1,3 @@
-use crate::system::Command;
 use bevy_utils::{HashMap, HashSet};
 use core::any::TypeId;
 use smallvec::SmallVec;
@@ -12,15 +11,18 @@ use crate::{
     query::{ReadOnlyWorldQuery, WorldQuery},
     system::Query,
     world::World,
+    system::Command
 };
 
 mod joins;
 mod traversals;
 mod tuple_traits;
+mod policies;
 
 pub use joins::*;
 pub use traversals::*;
 pub use tuple_traits::*;
+pub use policies::*;
 
 mod sealed {
     use super::*;
@@ -71,15 +73,6 @@ impl Edges {
             .into_iter()
             .flatten()
     }
-}
-
-// Precedence: Most data latering operation is preferred.
-// Smaller number -> Higher precedence
-pub enum DespawnPolicy {
-    RecursiveDespawn = 0,
-    RecursiveDelink = 1,
-    Reparent = 2,
-    Orphan = 3,
 }
 
 pub trait Relation: 'static + Sized + Send + Sync {
@@ -294,7 +287,9 @@ where
             .unwrap()
             .insert((foster_edges, foster_storage));
 
-        // TODO: Cleanup
+        if let Some(old_target) = exclusive_overwrite {
+            R::DESPAWN_POLICY.apply(world, Operation::Delink(self.foster, TypeId::of::<Storage<R>>(), old_target));
+        }
     }
 }
 
@@ -329,7 +324,7 @@ where
                 .expect("Target should have relation entry")
                 .remove(&self.foster);
 
-            // TODO: Cleanup
+            R::DESPAWN_POLICY.apply(world, Operation::Delink(self.foster, TypeId::of::<Storage<R>>(), self.target));
         }
     }
 }
@@ -340,9 +335,7 @@ pub struct CheckeDespawn {
 
 impl Command for CheckeDespawn {
     fn write(self, world: &mut World) {
-        if let Some(indices) = world.get_mut::<Edges>(self.entity) {
-            // TODO: Cleanup
-        }
+        DespawnPolicy::RecursiveDespawn.apply(world, Operation::Despawn(self.entity));
         world.despawn(self.entity);
     }
 }
