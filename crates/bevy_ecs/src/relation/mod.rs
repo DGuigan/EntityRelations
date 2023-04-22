@@ -154,7 +154,7 @@ where
     F: 'static + ReadOnlyWorldQuery,
     R: RelationQuerySet + Send + Sync,
 {
-    fn ops(&self) -> Ops<&Self, R::ColsWith<()>, R::ColsWith<Drop>, R::ColsWith<Drop>> {
+    pub fn ops(&self) -> Ops<&Self, R::ColsWith<()>, R::ColsWith<Drop>, R::ColsWith<Drop>> {
         Ops {
             query: self,
             joins: R::ColsWith::<()>::default(),
@@ -164,7 +164,7 @@ where
         }
     }
 
-    fn ops_mut(&mut self) -> Ops<&mut Self, R::ColsWith<()>, R::ColsWith<Drop>, R::ColsWith<Drop>> {
+    pub fn ops_mut(&mut self) -> Ops<&mut Self, R::ColsWith<()>, R::ColsWith<Drop>, R::ColsWith<Drop>> {
         Ops {
             query: self,
             joins: R::ColsWith::<()>::default(),
