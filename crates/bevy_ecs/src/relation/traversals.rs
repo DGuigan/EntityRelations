@@ -12,7 +12,7 @@ pub struct BreadthFirst<R: Relation> {
 }
 
 impl<Query, Joins, EdgeComb, StorageComb> Ops<Query, Joins, EdgeComb, StorageComb> {
-    fn breadth_first<R: Relation>(
+    pub fn breadth_first<R: Relation>(
         self,
         start: Entity,
     ) -> Ops<Query, Joins, EdgeComb, StorageComb, BreadthFirst<R>> {
