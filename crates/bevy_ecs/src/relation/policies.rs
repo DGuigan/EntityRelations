@@ -89,7 +89,7 @@ struct AscendedParents {
 
 impl AscendedParents {
     fn ascend_parent(&mut self, world: &World, entity: Entity) {
-        let Some(entity_ref) = world.get_entity(entity) else { return };
+        let Some(entity_ref) = world.get_entity(entity) else { return; };
         let edges = entity_ref
             .get::<Edges>()
             .expect("Edge component should exist");
@@ -153,33 +153,28 @@ fn descend_despawn_relations(
     let mut staged_for_despawn: HashSet<Entity> = HashSet::new();
 
     while let Some(entity) = to_visit.pop_front() {
-        if staged_for_despawn.contains(&entity) {
-            continue;
-        } else {
+        if staged_for_despawn.contains(&entity) { continue; };
+
+        if let Some(entity_ref) = world.get_entity(entity) {
             staged_for_despawn.insert(entity);
-        }
+            let edges = entity_ref.get::<Edges>().expect("Edge component should exist");
 
-        let edges = world
-            .get_entity(entity)
-            .expect("Entity should exist")
-            .get::<Edges>()
-            .expect("Edge component should exist");
+            ascended_parents.ascend_parent(world, root);
 
-        ascended_parents.ascend_parent(world, root);
-
-        for (relation, parents) in edges.fosters.iter() {
-            for parent in parents.iter() {
-                if !staged_for_despawn.contains(parent) {
-                    operations.push(Operation::Delink(*parent, *relation, entity));
+            for (relation, parents) in edges.fosters.iter() {
+                for parent in parents.iter() {
+                    if !staged_for_despawn.contains(parent) {
+                        operations.push(Operation::Delink(*parent, *relation, entity));
+                    }
                 }
             }
-        }
 
-        for (_relation, children) in edges.targets[DespawnPolicy::RecursiveDespawn as usize].iter()
-        {
-            for (child, _storage_id) in children.iter() {
-                operations.push(Operation::Despawn(*child));
-                to_visit.push_back(*child);
+            for (_relation, children) in edges.targets[DespawnPolicy::RecursiveDespawn as usize].iter()
+            {
+                for (child, _storage_id) in children.iter() {
+                    operations.push(Operation::Despawn(*child));
+                    to_visit.push_back(*child);
+                }
             }
         }
     }
@@ -225,9 +220,7 @@ fn descend_delink_relation(
     let mut to_visit: VecDeque<Entity> = VecDeque::from([root]);
 
     while let Some(entity) = to_visit.pop_front() {
-        if staged_for_despawn.contains(&entity) {
-            continue;
-        };
+        if staged_for_despawn.contains(&entity) { continue; }
 
         let edges = world
             .get_entity(entity)
