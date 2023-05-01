@@ -1,0 +1,10 @@
+stages:
+  - unit-tests
+
+unit-test-stage:
+  stage: unit-tests
+  image: rust:latest
+  script:
+    - apt-get update
+    - apt-get --yes install --no-install-recommends libasound2-dev libudev-dev
+    - cargo test --workspace --lib
