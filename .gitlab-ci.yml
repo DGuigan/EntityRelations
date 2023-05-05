@@ -7,4 +7,5 @@ unit-test-stage:
   script:
     - apt-get update
     - apt-get --yes install --no-install-recommends libasound2-dev libudev-dev
+    - cd src
     - cargo test --workspace --lib
