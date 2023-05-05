@@ -539,25 +539,17 @@ where
 #[allow(unused_variables)]
 mod compile_tests {
     use super::*;
+    use crate::prelude::*;
     use crate::relation::ForEachPermutations;
-    use crate::{component::TableStorage, prelude::*};
 
     #[derive(Component)]
     struct A;
 
-    #[derive(Component)]
+    #[derive(Relation)]
     struct B;
 
-    impl Relation for B {
-        type Storage = TableStorage;
-    }
-
-    #[derive(Component)]
+    #[derive(Relation)]
     struct C;
-
-    impl Relation for C {
-        type Storage = TableStorage;
-    }
 
     #[derive(Component)]
     struct D;
@@ -645,7 +637,7 @@ mod compile_tests {
             .for_each(|a, (d, (c, e))| {});
     }
 
-    fn generic<R: Relation>(rq: Query<(&A, Relations<&R>)>, b: Query<&B>) {
+    fn generic<R: Relation>(rq: Query<(&A, Relations<&R>)>, b: Query<&D>) {
         rq.ops().join::<R>(&b).for_each(|a, b| {})
     }
 }

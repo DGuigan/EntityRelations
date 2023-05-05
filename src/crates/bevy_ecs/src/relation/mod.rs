@@ -9,20 +9,21 @@ use crate::{
     component::{Component, ComponentStorage},
     entity::Entity,
     query::{ReadOnlyWorldQuery, WorldQuery},
+    system::Command,
     system::Query,
     world::World,
-    system::Command
 };
 
 mod joins;
+mod policies;
 mod traversals;
 mod tuple_traits;
-mod policies;
 
+pub use bevy_ecs_macros::Relation;
 pub use joins::*;
+pub use policies::*;
 pub use traversals::*;
 pub use tuple_traits::*;
-pub use policies::*;
 
 mod sealed {
     use super::*;
@@ -164,7 +165,9 @@ where
         }
     }
 
-    pub fn ops_mut(&mut self) -> Ops<&mut Self, R::ColsWith<()>, R::ColsWith<Drop>, R::ColsWith<Drop>> {
+    pub fn ops_mut(
+        &mut self,
+    ) -> Ops<&mut Self, R::ColsWith<()>, R::ColsWith<Drop>, R::ColsWith<Drop>> {
         Ops {
             query: self,
             joins: R::ColsWith::<()>::default(),
@@ -288,7 +291,10 @@ where
             .insert((foster_edges, foster_storage));
 
         if let Some(old_target) = exclusive_overwrite {
-            R::DESPAWN_POLICY.apply(world, Operation::Delink(self.foster, TypeId::of::<Storage<R>>(), old_target));
+            R::DESPAWN_POLICY.apply(
+                world,
+                Operation::Delink(self.foster, TypeId::of::<Storage<R>>(), old_target),
+            );
         }
     }
 }
@@ -324,7 +330,10 @@ where
                 .expect("Target should have relation entry")
                 .remove(&self.foster);
 
-            R::DESPAWN_POLICY.apply(world, Operation::Delink(self.foster, TypeId::of::<Storage<R>>(), self.target));
+            R::DESPAWN_POLICY.apply(
+                world,
+                Operation::Delink(self.foster, TypeId::of::<Storage<R>>(), self.target),
+            );
         }
     }
 }

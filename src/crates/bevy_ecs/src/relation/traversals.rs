@@ -394,27 +394,19 @@ where
 #[allow(unused_variables)]
 mod compile_tests {
     use super::*;
-    use crate::{component::TableStorage, prelude::*};
+    use crate::prelude::*;
 
     #[derive(Component)]
     struct A;
 
-    #[derive(Component)]
+    #[derive(Relation)]
     struct B;
 
-    #[derive(Component)]
+    #[derive(Relation)]
     struct C;
 
     #[derive(Component)]
     struct D;
-
-    impl Relation for B {
-        type Storage = TableStorage;
-    }
-
-    impl Relation for C {
-        type Storage = TableStorage;
-    }
 
     fn no_join(left: Query<(&A, Relations<&B>)>, start: Entity) {
         left.ops().breadth_first::<B>(start).for_each(|a, _| {})
@@ -488,7 +480,7 @@ mod compile_tests {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
-    use crate::{self as bevy_ecs, component::TableStorage, prelude::*};
+    use crate::{self as bevy_ecs, prelude::*};
 
     fn run_system<Param, S: IntoSystem<(), (), Param>>(world: &mut World, system: S) {
         let mut schedule = Schedule::default();
@@ -505,11 +497,8 @@ mod unit_tests {
         y: i32,
     }
 
+    #[derive(Relation)]
     struct Child;
-
-    impl Relation for Child {
-        type Storage = TableStorage;
-    }
 
     fn setup(mut commands: Commands) {
         let ctrl = commands.spawn((Pos { x: 0, y: 5 }, Root)).id();
