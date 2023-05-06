@@ -338,11 +338,11 @@ where
     }
 }
 
-pub struct CheckeDespawn {
+pub struct CheckedDespawn {
     pub entity: Entity,
 }
 
-impl Command for CheckeDespawn {
+impl Command for CheckedDespawn {
     fn write(self, world: &mut World) {
         DespawnPolicy::RecursiveDespawn.apply(world, Operation::Despawn(self.entity));
         world.despawn(self.entity);

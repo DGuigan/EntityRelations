@@ -153,11 +153,15 @@ fn descend_despawn_relations(
     let mut staged_for_despawn: HashSet<Entity> = HashSet::new();
 
     while let Some(entity) = to_visit.pop_front() {
-        if staged_for_despawn.contains(&entity) { continue; };
+        if staged_for_despawn.contains(&entity) {
+            continue;
+        };
 
         if let Some(entity_ref) = world.get_entity(entity) {
             staged_for_despawn.insert(entity);
-            let edges = entity_ref.get::<Edges>().expect("Edge component should exist");
+            let edges = entity_ref
+                .get::<Edges>()
+                .expect("Edge component should exist");
 
             ascended_parents.ascend_parent(world, root);
 
@@ -169,7 +173,8 @@ fn descend_despawn_relations(
                 }
             }
 
-            for (_relation, children) in edges.targets[DespawnPolicy::RecursiveDespawn as usize].iter()
+            for (_relation, children) in
+                edges.targets[DespawnPolicy::RecursiveDespawn as usize].iter()
             {
                 for (child, _storage_id) in children.iter() {
                     operations.push(Operation::Despawn(*child));
@@ -220,7 +225,9 @@ fn descend_delink_relation(
     let mut to_visit: VecDeque<Entity> = VecDeque::from([root]);
 
     while let Some(entity) = to_visit.pop_front() {
-        if staged_for_despawn.contains(&entity) { continue; }
+        if staged_for_despawn.contains(&entity) {
+            continue;
+        }
 
         let edges = world
             .get_entity(entity)
@@ -421,7 +428,7 @@ mod unit_tests {
     fn trigger_policies_via_despawn(mut commands: Commands, q: Query<Entity, With<TriggerPoint>>) {
         let entity = q.single();
 
-        commands.add(CheckeDespawn { entity });
+        commands.add(CheckedDespawn { entity });
     }
 
     fn trigger_policies_via_delink(
